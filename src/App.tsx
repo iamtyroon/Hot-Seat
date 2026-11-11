@@ -21,7 +21,17 @@ export function App() {
   const [selectedManualAgentId, setSelectedManualAgentId] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState<number>(1);
   const prevTakeoverCountRef = useRef<number | null>(null);
+
+  const handleAdvanceOnboarding = (nextStep: number) => {
+    setOnboardingStep(nextStep);
+  };
+
+  const handleStartOnboarding = () => {
+    setActivePage('wall');
+    setOnboardingStep(1);
+  };
 
   // System Light/Dark Mode & Time-of-Day Sync
   const [themePreference, setThemePreference] = useState<ThemePreference>('system');
@@ -316,7 +326,7 @@ export function App() {
     if (data.snapshot) setSnapshot(data.snapshot);
     setSelectedManualAgentId(data.agentId);
     showToast(
-      `Deployed ${payload.companyName.toUpperCase()} with PayPal Order ${data.order.orderId}!`
+      `Launched ${payload.companyName.toUpperCase()} onto the billboard (${data.order.orderId})!`
     );
   };
 
@@ -442,10 +452,18 @@ export function App() {
         onActivateKillSwitch={handleActivateKillSwitch}
         onRequestCommentary={handleRequestCommentary}
         onAddCrowd={handleAddCrowd}
-        onNavigateBrick={setActivePage}
+        onNavigateBrick={(page) => {
+          setActivePage(page);
+          if (page === 'studio' && onboardingStep === 1) {
+            setOnboardingStep(2);
+          }
+        }}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         isEmbedMode={isEmbedMode}
+        onboardingStep={onboardingStep}
+        onAdvanceOnboarding={handleAdvanceOnboarding}
+        onStartOnboarding={handleStartOnboarding}
       />
 
       {activePage !== 'wall' && !isEmbedMode && (
@@ -455,7 +473,12 @@ export function App() {
           userAccount={userAccount}
           onSignIn={handleSignIn}
           onSignOut={handleSignOut}
-          onClose={() => setActivePage('wall')}
+          onClose={() => {
+            setActivePage('wall');
+            if (onboardingStep >= 2 && onboardingStep <= 4) {
+              setOnboardingStep(1);
+            }
+          }}
           onCompileStrategy={handleCompileStrategy}
           onDeployAgent={handleDeployAgent}
           onUpdateAgent={handleUpdateAgent}
@@ -467,6 +490,8 @@ export function App() {
           onCreateTopUpOrder={handleCreateTopUpOrder}
           onConfirmOrderWebhook={handleConfirmOrderWebhook}
           onCashOutPayout={handleCashOutPayout}
+          onboardingStep={onboardingStep}
+          onAdvanceOnboarding={handleAdvanceOnboarding}
         />
       )}
     </div>

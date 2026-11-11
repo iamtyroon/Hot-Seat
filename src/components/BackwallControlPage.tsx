@@ -122,6 +122,8 @@ interface BackwallControlPageProps {
   ) => Promise<void>;
   onConfirmOrderWebhook: (orderId: string) => Promise<void>;
   onCashOutPayout: (agentId: string) => Promise<void>;
+  onboardingStep?: number;
+  onAdvanceOnboarding?: (nextStep: number) => void;
 }
 
 type BoothTab = 'deploy' | 'wallet' | 'curve' | 'domains';
@@ -141,6 +143,8 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
   onCreateTopUpOrder,
   onConfirmOrderWebhook,
   onCashOutPayout,
+  onboardingStep = 0,
+  onAdvanceOnboarding,
 }) => {
   const [activeTab, setActiveTab] = useState<BoothTab>('deploy');
   const [showAuthDrawer, setShowAuthDrawer] = useState<boolean>(false);
@@ -224,6 +228,12 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
       setActiveTab('deploy');
     }
   }, [isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (onboardingStep >= 2 && onboardingStep <= 4) {
+      setActiveTab('deploy');
+    }
+  }, [onboardingStep]);
 
   useEffect(() => {
     fetch('/api/paypal/status')
@@ -564,6 +574,9 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         autoConfirmWebhook,
         snipeImmediatelyOnDeploy,
       });
+      if (onboardingStep > 0 && onAdvanceOnboarding) {
+        onAdvanceOnboarding(5);
+      }
       onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Deployment failed.');
@@ -594,7 +607,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         <div className="px-6 pt-5 pb-4 border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-4 shrink-0">
           <div>
             <h2 className="font-btn text-xl font-extrabold uppercase tracking-tight text-slate-900 dark:text-white">
-              Agent Studio &amp; Street Vault
+              Launch Your Web App on the Billboard
             </h2>
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
               <span>
@@ -823,119 +836,381 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         {/* Scrollable Content Area */}
         <div className="p-6 overflow-y-auto space-y-5">
           {/* ===============================================================
-              TAB 1: SIMPLE, STREAMLINED AGENT DEPLOYMENT
+              TAB 1: SIMPLE, STREAMLINED WEB APP DEPLOYMENT + ONBOARDING HAPPY PATH
              =============================================================== */}
           {activeTab === 'deploy' && (
             <form onSubmit={handleDeploy} className="space-y-4">
-              {/* Row 1: Brand Name & Website URL */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    Startup or Brand Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={28}
-                    placeholder="Acme Robotics"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
-                  />
+              {/* INTERACTIVE ONBOARDING TOUR BANNER FOR STEPS 2, 3, AND 4 */}
+              {onboardingStep >= 2 && onboardingStep <= 4 && (
+                <div className="rounded-xl bg-[#111318] text-white border-[2.5px] border-[#FFE66D] shadow-[4px_4px_0px_#090B0E] p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#FFE66D]">
+                        Onboarding Happy Path · Step {onboardingStep} of 5
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {[2, 3, 4].map((st) => (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => onAdvanceOnboarding?.(st)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                            onboardingStep === st
+                              ? 'bg-[#FFE66D] text-[#111318]'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {st - 1}/3
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => onAdvanceOnboarding?.(0)}
+                        className="text-xs text-slate-400 hover:text-white ml-1 cursor-pointer"
+                      >
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+
+                  {onboardingStep === 2 && (
+                    <div className="space-y-2.5">
+                      <div>
+                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
+                          Now in this Modal: Enter Your Web App Name &amp; Live URL
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                          Okay, now you&apos;ve opened the Studio modal! In <strong className="text-[#FFE66D]">Box 1</strong> highlighted below, write your <strong className="text-white">Web App Name</strong> (e.g. <code className="font-mono text-[#FFE66D]">PixelFlow Studio</code>) and your <strong className="text-white">Web App URL</strong> (e.g. <code className="font-mono text-[#FFE66D]">pixelflow.app</code>).
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!companyName.trim()) setCompanyName('PixelFlow Studio');
+                            if (!companyUrl.trim()) setCompanyUrl('pixelflow.app');
+                            onAdvanceOnboarding?.(3);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[#FFE66D] text-xs font-semibold cursor-pointer"
+                        >
+                          Auto-Fill Sample Web App &amp; Next →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!companyName.trim()) setCompanyName('PixelFlow Studio');
+                            if (!companyUrl.trim()) setCompanyUrl('pixelflow.app');
+                            onAdvanceOnboarding?.(3);
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase cursor-pointer"
+                        >
+                          Next: Write Headline →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {onboardingStep === 3 && (
+                    <div className="space-y-2.5">
+                      <div>
+                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
+                          Next: Write Your Web App Pitch &amp; Pick a Billboard Style
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                          In <strong className="text-[#FFE66D]">Box 2</strong> below, write a punchy <strong className="text-white">Billboard Headline</strong> explaining what your web app does, or tap one of the quick templates below:
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          'DESIGN & SHIP INTERACTIVE WEB APPS IN SECONDS',
+                          'REALTIME MULTIPLAYER CANVAS FOR PRODUCT TEAMS',
+                          'INSTANT AI WORKSPACE FOR MODERN DEVELOPERS',
+                        ].map((sampleHl) => (
+                          <button
+                            key={sampleHl}
+                            type="button"
+                            onClick={() => setActiveHeadline(sampleHl)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-mono cursor-pointer transition-colors ${
+                              activeHeadline === sampleHl
+                                ? 'bg-[#FFE66D] text-[#111318] font-bold'
+                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            + “{sampleHl}”
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => onAdvanceOnboarding?.(2)}
+                          className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          ← Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!activeHeadline.trim()) {
+                              setActiveHeadline('DESIGN & SHIP INTERACTIVE WEB APPS IN SECONDS');
+                            }
+                            onAdvanceOnboarding?.(4);
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase cursor-pointer"
+                        >
+                          Next: Fund &amp; Launch →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {onboardingStep === 4 && (
+                    <div className="space-y-2">
+                      <div>
+                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
+                          Final Step: Pick Your Drone Strategy &amp; Tap Launch Below!
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                          Choose how your autonomous drone bids for your web app, pick a prepaid wallet amount (<strong className="text-[#FFE66D]">$5, $10, or $20</strong>), and click the highlighted <strong className="text-[#FFE66D]">“Fund &amp; Launch Web App onto Billboard”</strong> button at the bottom!
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => onAdvanceOnboarding?.(3)}
+                          className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          ← Back
+                        </button>
+                        <span className="text-[11px] font-mono text-[#7CFF00]">
+                          ↓ Tap the orange launch button below to paint the wall!
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Row 1: Web App Name & Website URL */}
+              <div
+                onClick={() => {
+                  if (onboardingStep === 3 || onboardingStep === 4) {
+                    // allow user to interact freely
+                  }
+                }}
+                className={`rounded-xl p-3.5 transition-all ${
+                  onboardingStep === 2
+                    ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
+                    : 'border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-[#171C28]/40'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    1. Web App Identity &amp; Destination Link
+                  </span>
+                  {onboardingStep === 2 && (
+                    <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
+                      ← Start Here: Type Name &amp; URL
+                    </span>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    Website URL
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={38}
-                    placeholder="acmerobotics.com"
-                    value={companyUrl}
-                    onChange={(e) => setCompanyUrl(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Web App or Brand Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={28}
+                      placeholder="PixelFlow Studio"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Live Web App URL
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={38}
+                      placeholder="pixelflow.app"
+                      value={companyUrl}
+                      onChange={(e) => setCompanyUrl(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Row 2: Billboard Headline + Optional Logo */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Billboard Headline
-                  </label>
-                  <span className="text-[11px] text-slate-400 font-mono tabular-nums">
-                    {activeHeadline.length}/46
+              {/* Row 2: Billboard Headline + Optional Logo + Mural Style */}
+              <div
+                className={`rounded-xl p-3.5 space-y-3.5 transition-all ${
+                  onboardingStep === 3
+                    ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
+                    : 'border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-[#171C28]/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    2. Billboard Headline &amp; Mural Artwork Style
                   </span>
+                  {onboardingStep === 3 && (
+                    <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
+                      ← Write Pitch &amp; Pick Style
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2.5">
-                  <input
-                    type="text"
-                    maxLength={46}
-                    placeholder="Ship production clusters in one click"
-                    value={activeHeadline}
-                    onChange={(e) => setActiveHeadline(e.target.value)}
-                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
-                  />
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Billboard Headline (What your web app does)
+                    </label>
+                    <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                      {activeHeadline.length}/46
+                    </span>
+                  </div>
 
-                  <label
-                    title="Upload optional brand logo"
-                    className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700/90 bg-slate-50 hover:bg-slate-100 dark:bg-[#171C28] dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
-                  >
-                    <ImagePlus className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                    <span>{logoDataUrl ? 'Logo Set' : 'Logo'}</span>
+                  <div className="flex items-center gap-2.5">
                     <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleStudioLogoUpload}
-                      className="hidden"
+                      type="text"
+                      maxLength={46}
+                      placeholder="Design and ship interactive web apps in seconds"
+                      value={activeHeadline}
+                      onChange={(e) => setActiveHeadline(e.target.value)}
+                      className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700/90 bg-white dark:bg-[#0D1118] px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF4733]/40"
                     />
-                  </label>
 
-                  {logoDataUrl && (
-                    <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D1118]">
-                      <img
-                        src={logoDataUrl}
-                        alt="Uploaded brand logo"
-                        referrerPolicy="no-referrer"
-                        className="w-5 h-5 object-contain"
+                    <label
+                      title="Upload optional brand logo"
+                      className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700/90 bg-slate-50 hover:bg-slate-100 dark:bg-[#171C28] dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                    >
+                      <ImagePlus className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                      <span>{logoDataUrl ? 'Logo Set' : 'Logo'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleStudioLogoUpload}
+                        className="hidden"
                       />
-                      <button
-                        type="button"
-                        onClick={() => setLogoDataUrl('')}
-                        className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                    </label>
+
+                    {logoDataUrl && (
+                      <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D1118]">
+                        <img
+                          src={logoDataUrl}
+                          alt="Uploaded brand logo"
+                          referrerPolicy="no-referrer"
+                          className="w-5 h-5 object-contain"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setLogoDataUrl('')}
+                          className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {headlines.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {headlines.map((hl, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setActiveHeadline(hl)}
+                          className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer ${
+                            activeHeadline === hl
+                              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-medium'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {hl}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                {headlines.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {headlines.map((hl, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setActiveHeadline(hl)}
-                        className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer ${
-                          activeHeadline === hl
-                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-medium'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                        }`}
-                      >
-                        {hl}
-                      </button>
-                    ))}
+                {/* Spray Pigment Swatch & Mural Style */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2 border-t border-slate-200/80 dark:border-slate-800">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Drone Spray Color
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {[
+                        { idx: 0, color: '#FFE600', label: 'Volt' },
+                        { idx: 1, color: '#FF4733', label: 'Coral' },
+                        { idx: 2, color: '#00E5FF', label: 'Cyan' },
+                        { idx: 3, color: '#FF3399', label: 'Pink' },
+                        { idx: 4, color: '#7CFF00', label: 'Lime' },
+                        { idx: 6, color: '#8F33FF', label: 'Grape' },
+                      ].map((sw) => (
+                        <button
+                          key={sw.idx}
+                          type="button"
+                          onClick={() => setSprayThemeIndex(sw.idx)}
+                          title={sw.label}
+                          style={{ backgroundColor: sw.color }}
+                          className={`w-6 h-6 rounded-full border-2 border-slate-900 cursor-pointer transition-transform ${
+                            sprayThemeIndex === sw.idx
+                              ? 'scale-120 ring-2 ring-[#FF4733]'
+                              : 'opacity-80 hover:opacity-100'
+                          }`}
+                        />
+                      ))}
+                    </div>
                   </div>
-                )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Billboard Mural Template
+                    </label>
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => setSelectedTemplateId(e.target.value as AdTemplateId)}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D1118] px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none"
+                    >
+                      <option value="BOMB_BURST">Swiss Grid (Yellow Impact)</option>
+                      <option value="CROWN_TAG">Monumental Type (Direct on Brick)</option>
+                      <option value="SKATE_DECK">Kinetic Slash (Indigo / Cyan)</option>
+                      <option value="NEON_ARCADE">Emerald Spotlight (Monogram + Pitch)</option>
+                      <option value="WHEATPASTE_POSTER">Editorial Frame (Warm Gallery)</option>
+                      <option value="SPRAY_CLOUD">Split Showcase (Two-Column Crest)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
-              {/* Row 3: Simple Bidding Controls + Optional AI Goal Compiler */}
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-[#171C28]/60 p-4 space-y-3.5">
+              {/* Row 3: Simple Bidding Controls + Wallet Top-Up & Launch */}
+              <div
+                className={`rounded-xl p-4 space-y-3.5 transition-all ${
+                  onboardingStep === 4
+                    ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
+                    : 'border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-[#171C28]/60'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    3. Autonomous Bidding Strategy &amp; Wallet Funding
+                  </span>
+                  {onboardingStep === 4 && (
+                    <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
+                      ← Ready to Launch
+                    </span>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -951,10 +1226,10 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                       }
                       className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D1118] px-3 py-2 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none"
                     >
-                      <option value="sniper">🎯 Sniper (Strike dips &amp; decayed rates)</option>
-                      <option value="aggressive">⚡ Aggressive (Dominate &amp; counter-snipe)</option>
-                      <option value="patient">⏳ Patient (Low-cost opportunist)</option>
-                      <option value="peak">🔥 Peak-Hour (High-traffic challenger)</option>
+                      <option value="sniper">Sniper (Strike dips &amp; decayed rates)</option>
+                      <option value="aggressive">Aggressive (Dominate &amp; counter-snipe)</option>
+                      <option value="patient">Patient (Low-cost opportunist)</option>
+                      <option value="peak">Peak-Hour (High-traffic challenger)</option>
                     </select>
                   </div>
 
@@ -984,54 +1259,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                       }}
                       className="w-full accent-[#FF4733] cursor-pointer mt-1.5"
                     />
-                  </div>
-                </div>
-
-                {/* Spray Pigment Swatch & Mural Style */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2 border-t border-slate-200/80 dark:border-slate-800">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Agent Spray Color
-                    </label>
-                    <div className="flex items-center gap-2">
-                      {[
-                        { idx: 0, color: '#FFE600', label: 'Volt' },
-                        { idx: 1, color: '#FF4733', label: 'Coral' },
-                        { idx: 2, color: '#00E5FF', label: 'Cyan' },
-                        { idx: 3, color: '#FF3399', label: 'Pink' },
-                        { idx: 4, color: '#7CFF00', label: 'Lime' },
-                        { idx: 6, color: '#8F33FF', label: 'Grape' },
-                      ].map((sw) => (
-                        <button
-                          key={sw.idx}
-                          type="button"
-                          onClick={() => setSprayThemeIndex(sw.idx)}
-                          title={sw.label}
-                          style={{ backgroundColor: sw.color }}
-                          className={`w-6 h-6 rounded-full border-2 border-slate-900 cursor-pointer transition-transform ${
-                            sprayThemeIndex === sw.idx ? 'scale-120 ring-2 ring-[#FF4733]' : 'opacity-80 hover:opacity-100'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Billboard Mural Template
-                    </label>
-                    <select
-                      value={selectedTemplateId}
-                      onChange={(e) => setSelectedTemplateId(e.target.value as AdTemplateId)}
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D1118] px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none"
-                    >
-                      <option value="BOMB_BURST">Swiss Grid (Yellow Impact)</option>
-                      <option value="CROWN_TAG">Editorial Keynote (Coral Proof)</option>
-                      <option value="SKATE_DECK">Split Comparison (Blue / Cream)</option>
-                      <option value="NEON_ARCADE">Giant Proof Wall (Magenta)</option>
-                      <option value="WHEATPASTE_POSTER">Browser Frame (Product Card)</option>
-                      <option value="SPRAY_CLOUD">Kinetic Slash (Emerald Diagonal)</option>
-                    </select>
                   </div>
                 </div>
 
@@ -1073,7 +1300,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-[#FF4733]" />
-                      <span>Write strategy in plain English with Gemini (optional)</span>
+                      <span>Write custom bidding strategy in plain English (optional)</span>
                     </span>
                     {showAiAssistant ? (
                       <ChevronUp className="w-3.5 h-3.5" />
@@ -1099,7 +1326,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                           className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>{isCompiling ? 'Compiling...' : 'Compile with Gemini'}</span>
+                          <span>{isCompiling ? 'Compiling...' : 'Compile Strategy'}</span>
                         </button>
                         {compiledBy && (
                           <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
@@ -1115,34 +1342,34 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Row 4: Wallet Top-Up & Payout Email */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                <div>
-                  <span className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Prepaid Wallet Funding
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Unused time is refunded pro-rata automatically
-                  </span>
-                </div>
+                {/* Wallet Top-Up */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200/80 dark:border-slate-800">
+                  <div>
+                    <span className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Prepaid Wallet Funding
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Unused time is refunded pro-rata automatically
+                    </span>
+                  </div>
 
-                <div className="flex items-center gap-1.5 p-1 rounded-lg bg-slate-100 dark:bg-[#0D1118] border border-slate-200/80 dark:border-slate-800">
-                  {[5, 10, 20].map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setTopUpDollars(amt)}
-                      className={`px-3.5 py-1.5 rounded-md text-xs font-mono font-semibold transition-colors cursor-pointer ${
-                        topUpDollars === amt
-                          ? 'bg-white dark:bg-[#1E2536] text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      ${amt}.00
-                    </button>
-                  ))}
+                  <div className="flex items-center gap-1.5 p-1 rounded-lg bg-slate-100 dark:bg-[#0D1118] border border-slate-200/80 dark:border-slate-800">
+                    {[5, 10, 20].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTopUpDollars(amt)}
+                        className={`px-3.5 py-1.5 rounded-md text-xs font-mono font-semibold transition-colors cursor-pointer ${
+                          topUpDollars === amt
+                            ? 'bg-white dark:bg-[#1E2536] text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        ${amt}.00
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1155,13 +1382,17 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
               <button
                 type="submit"
                 disabled={isDeploying || moderationStatus === 'flagged'}
-                className="street-ui-btn w-full py-3 px-4 rounded-xl bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold uppercase text-sm inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className={`street-ui-btn w-full py-3 px-4 rounded-xl bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold uppercase text-sm inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                  onboardingStep === 4
+                    ? 'ring-4 ring-[#FFE66D] shadow-[0_0_28px_rgba(255,230,109,0.9)]'
+                    : ''
+                }`}
               >
                 <Zap className="w-4 h-4 fill-current" />
                 <span>
                   {isDeploying
-                    ? 'Funding Wallet & Deploying...'
-                    : `Fund $${topUpDollars}.00 & Launch Agent into Arena`}
+                    ? 'Funding Wallet & Painting Billboard...'
+                    : `Fund $${topUpDollars}.00 & Launch Web App onto Billboard`}
                 </span>
               </button>
             </form>
@@ -1772,90 +2003,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                     </p>
                   )}
                 </form>
-              </div>
-
-              {/* 3. GitHub firebase-applet-config.json Secret Protection & Vercel Env Setup */}
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-950/20 p-4 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                      GitHub Secret Protection &amp; Vercel Environment Variables
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                      <code className="font-mono text-[11px]">firebase-applet-config.json</code> is now in{' '}
-                      <code className="font-mono text-[11px]">.gitignore</code> and loaded via{' '}
-                      <code className="font-mono text-[11px]">VITE_FIREBASE_*</code> env vars so your repo builds cleanly on Vercel without exposing keys on GitHub.
-                    </p>
-                  </div>
-
-                  <a
-                    href={GCP_CREDENTIALS_CONSOLE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shrink-0"
-                  >
-                    <span>Restrict / Rotate Key in GCP</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D1118] p-3 flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                        Step 1: Untrack File From GitHub
-                      </span>
-                      <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate block mt-0.5">
-                        git rm --cached firebase-applet-config.json
-                      </code>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyGitRmCommand}
-                      className="px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      {copiedGitFix ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Cmd</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D1118] p-3 flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                        Step 2: Paste in Vercel Env Vars
-                      </span>
-                      <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate block mt-0.5">
-                        VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID...
-                      </code>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyVercelEnvBlock}
-                      className="px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      {copiedVercelEnv ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Env</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           )}

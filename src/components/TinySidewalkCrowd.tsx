@@ -12,6 +12,7 @@ interface TinySidewalkCrowdProps {
   recentSnipeAttacker?: string | null;
   onOpenVendorModal?: () => void;
   onAddViews?: (count: number) => void;
+  highlightVendorForTour?: boolean;
 }
 
 const HOODIE_COLORS = [
@@ -39,6 +40,7 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
   recentSnipeAttacker,
   onOpenVendorModal,
   onAddViews,
+  highlightVendorForTour = false,
 }) => {
   const [crowdMode, setCrowdMode] = useState<CrowdBehaviorMode>('split');
 
@@ -208,20 +210,30 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
         <button
           type="button"
           onClick={onOpenVendorModal}
-          title="Click the Street Vendor Stand to deploy an AI Agent or manage PayPal Vault"
+          title="Click the Street Vendor Stand to launch your Web App on the billboard"
           style={{
             right: '3.5%',
             bottom: '10px',
-            zIndex: 28,
+            zIndex: highlightVendorForTour ? 55 : 28,
           }}
-          className="group absolute pointer-events-auto cursor-pointer focus:outline-none transition-transform duration-200 hover:-translate-y-1.5 hover:scale-[1.04]"
+          className={`group absolute pointer-events-auto cursor-pointer focus:outline-none transition-transform duration-200 hover:-translate-y-1.5 hover:scale-[1.04] ${
+            highlightVendorForTour
+              ? 'ring-4 ring-[#FFE66D] rounded-xl p-1 bg-[#FFE66D]/15 shadow-[0_0_36px_rgba(255,230,109,0.9)]'
+              : ''
+          }`}
         >
+          {highlightVendorForTour && (
+            <div className="mb-1.5 px-2.5 py-1 bg-[#FF4733] text-white border-2 border-[#111318] shadow-[3px_3px_0px_#111318] rounded-xs font-btn text-[11px] font-extrabold uppercase tracking-wide flex items-center justify-center gap-1 whitespace-nowrap animate-bounce">
+              <span>STEP 1 · TAP BOOTH TO START ↓</span>
+            </div>
+          )}
+
           {/* Floating Interactive Sign Callout above the Awning */}
           <div className="mb-1 px-2.5 py-0.5 bg-[#1B4332] group-hover:bg-[#FF4733] text-[#FFE66D] group-hover:text-white border-2 border-[#1B1F24] shadow-[3px_3px_0px_#1B1F24] rounded-xs font-btn text-[10px] font-extrabold uppercase tracking-tight flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors">
-            <span>AGENT BOOTH &amp; VAULT</span>
+            <span>LAUNCH WEB APP BOOTH</span>
             {agentCount > 0 && (
               <span className="font-mono text-[#95D5B2] group-hover:text-white">
-                · {agentCount} BOTS
+                · {agentCount} LIVE
               </span>
             )}
           </div>
