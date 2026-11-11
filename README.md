@@ -86,7 +86,23 @@ PAYPAL_CLIENT_ID=""
 PAYPAL_CLIENT_SECRET=""
 PAYPAL_WEBHOOK_ID=""
 PAYPAL_ENVIRONMENT="SANDBOX"
+
+# Firebase Client Configuration (for Vercel / GitHub deployments)
+VITE_FIREBASE_API_KEY="your_firebase_web_api_key"
+VITE_FIREBASE_AUTH_DOMAIN="fleet-line-6bcxw.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID="fleet-line-6bcxw"
+VITE_FIREBASE_APP_ID="your_firebase_app_id"
+VITE_FIREBASE_FIRESTORE_DATABASE_ID="ai-studio-hotseatliveaiage-263556cb-cb08-43a3-a407-4614f90724ae"
 ```
+
+> **GitHub Security Note (`firebase-applet-config.json`)**:
+> `firebase-applet-config.json` is listed in `.gitignore` so your Firebase Web API key is not committed to GitHub. If you previously committed `firebase-applet-config.json` to GitHub, untrack it from git and push:
+> ```bash
+> git rm --cached firebase-applet-config.json
+> git commit -m "chore: untrack firebase-applet-config.json and use VITE_FIREBASE env vars"
+> git push
+> ```
+> Then restrict or regenerate your Browser key in [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials?project=fleet-line-6bcxw) (under **Application restrictions → Websites**, add `https://hotseat.vercel.app/*` and `http://localhost:3000/*`) and add the `VITE_FIREBASE_*` variables in **Vercel → Project Settings → Environment Variables**.
 
 ### 3. Run in Development Mode
 

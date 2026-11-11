@@ -21,7 +21,49 @@ import {
   where,
   serverTimestamp,
 } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+interface FirebaseAppletConfig {
+  projectId: string;
+  appId: string;
+  apiKey: string;
+  authDomain: string;
+  firestoreDatabaseId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  measurementId?: string;
+  oAuthClientId?: string;
+  recaptchaSiteKey?: string;
+}
+
+// Safely load local firebase-applet-config.json if present (gitignored in GitHub/Vercel builds)
+const localConfigModules = import.meta.glob<{ default: FirebaseAppletConfig }>(
+  '../firebase-applet-config.json',
+  { eager: true }
+);
+const localFileConfig: Partial<FirebaseAppletConfig> =
+  localConfigModules['../firebase-applet-config.json']?.default || {};
+
+const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env || {};
+
+const firebaseConfig: FirebaseAppletConfig = {
+  projectId: env.VITE_FIREBASE_PROJECT_ID || localFileConfig.projectId || 'fleet-line-6bcxw',
+  appId: env.VITE_FIREBASE_APP_ID || localFileConfig.appId || '',
+  apiKey: env.VITE_FIREBASE_API_KEY || localFileConfig.apiKey || '',
+  authDomain:
+    env.VITE_FIREBASE_AUTH_DOMAIN ||
+    localFileConfig.authDomain ||
+    'fleet-line-6bcxw.firebaseapp.com',
+  firestoreDatabaseId:
+    env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+    localFileConfig.firestoreDatabaseId ||
+    'ai-studio-hotseatliveaiage-263556cb-cb08-43a3-a407-4614f90724ae',
+  storageBucket:
+    env.VITE_FIREBASE_STORAGE_BUCKET ||
+    localFileConfig.storageBucket ||
+    'fleet-line-6bcxw.firebasestorage.app',
+  messagingSenderId:
+    env.VITE_FIREBASE_MESSAGING_SENDER_ID || localFileConfig.messagingSenderId || '',
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || localFileConfig.measurementId || '',
+};
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -32,6 +74,19 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 export const FIREBASE_AUTH_DOMAIN = firebaseConfig.authDomain;
 export const FIREBASE_AUTHORIZED_DOMAINS_CONSOLE_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+export const GCP_CREDENTIALS_CONSOLE_URL = `https://console.cloud.google.com/apis/credentials?project=${firebaseConfig.projectId}`;
+
+export function getVercelFirebaseEnvSnippet(): string {
+  return [
+    `VITE_FIREBASE_API_KEY="${firebaseConfig.apiKey || 'YOUR_NEW_OR_RESTRICTED_FIREBASE_API_KEY'}"`,
+    `VITE_FIREBASE_AUTH_DOMAIN="${firebaseConfig.authDomain}"`,
+    `VITE_FIREBASE_PROJECT_ID="${firebaseConfig.projectId}"`,
+    `VITE_FIREBASE_APP_ID="${firebaseConfig.appId}"`,
+    `VITE_FIREBASE_FIRESTORE_DATABASE_ID="${firebaseConfig.firestoreDatabaseId}"`,
+    `VITE_FIREBASE_STORAGE_BUCKET="${firebaseConfig.storageBucket || ''}"`,
+    `VITE_FIREBASE_MESSAGING_SENDER_ID="${firebaseConfig.messagingSenderId || ''}"`,
+  ].join('\n');
+}
 
 export enum OperationType {
   CREATE = 'create',

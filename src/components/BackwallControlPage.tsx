@@ -18,6 +18,8 @@ import {
   FIREBASE_PROJECT_ID,
   FIREBASE_AUTH_DOMAIN,
   FIREBASE_AUTHORIZED_DOMAINS_CONSOLE_URL,
+  GCP_CREDENTIALS_CONSOLE_URL,
+  getVercelFirebaseEnvSnippet,
   isAdminEmail,
   saveAdminPayPalSettingsToFirestore,
 } from '../firebase';
@@ -173,6 +175,8 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
   );
   const [isSavingPaypalConfig, setIsSavingPaypalConfig] = useState<boolean>(false);
   const [paypalConfigFeedback, setPaypalConfigFeedback] = useState<string | null>(null);
+  const [copiedGitFix, setCopiedGitFix] = useState<boolean>(false);
+  const [copiedVercelEnv, setCopiedVercelEnv] = useState<boolean>(false);
 
   // Form State
   const [companyName, setCompanyName] = useState('');
@@ -463,6 +467,19 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
     navigator.clipboard?.writeText(window.location.hostname).catch(() => {});
     setCopiedHost(true);
     setTimeout(() => setCopiedHost(false), 2000);
+  };
+
+  const handleCopyGitRmCommand = () => {
+    const cmd = `git rm --cached firebase-applet-config.json && git commit -m "chore: untrack firebase-applet-config.json and use VITE_FIREBASE env vars" && git push`;
+    navigator.clipboard?.writeText(cmd).catch(() => {});
+    setCopiedGitFix(true);
+    setTimeout(() => setCopiedGitFix(false), 2500);
+  };
+
+  const handleCopyVercelEnvBlock = () => {
+    navigator.clipboard?.writeText(getVercelFirebaseEnvSnippet()).catch(() => {});
+    setCopiedVercelEnv(true);
+    setTimeout(() => setCopiedVercelEnv(false), 2500);
   };
 
   const handleStudioLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1755,6 +1772,90 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                     </p>
                   )}
                 </form>
+              </div>
+
+              {/* 3. GitHub firebase-applet-config.json Secret Protection & Vercel Env Setup */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-950/20 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      GitHub Secret Protection &amp; Vercel Environment Variables
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                      <code className="font-mono text-[11px]">firebase-applet-config.json</code> is now in{' '}
+                      <code className="font-mono text-[11px]">.gitignore</code> and loaded via{' '}
+                      <code className="font-mono text-[11px]">VITE_FIREBASE_*</code> env vars so your repo builds cleanly on Vercel without exposing keys on GitHub.
+                    </p>
+                  </div>
+
+                  <a
+                    href={GCP_CREDENTIALS_CONSOLE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shrink-0"
+                  >
+                    <span>Restrict / Rotate Key in GCP</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D1118] p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                        Step 1: Untrack File From GitHub
+                      </span>
+                      <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate block mt-0.5">
+                        git rm --cached firebase-applet-config.json
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyGitRmCommand}
+                      className="px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      {copiedGitFix ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Cmd</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D1118] p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                        Step 2: Paste in Vercel Env Vars
+                      </span>
+                      <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate block mt-0.5">
+                        VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID...
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyVercelEnvBlock}
+                      className="px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      {copiedVercelEnv ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Env</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
