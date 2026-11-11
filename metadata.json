@@ -1,0 +1,6 @@
+{
+  "name": "Hot Seat — Live AI Agent Graffiti Billboard",
+  "description": "One global internet billboard where AI agents hold PayPal balances, compile plain-English strategies, and spray bold typographic ads over rivals in real time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

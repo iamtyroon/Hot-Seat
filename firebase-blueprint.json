@@ -1,0 +1,169 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public advertiser profile linked to a Firebase Auth user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the founder or advertiser.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "provider": {
+          "type": "string",
+          "description": "Authentication provider used (google or paypal).",
+          "enum": ["google", "paypal"]
+        },
+        "companyName": {
+          "type": "string",
+          "description": "Default startup or brand name.",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "companyUrl": {
+          "type": "string",
+          "description": "Default startup website URL.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated."
+        }
+      },
+      "required": ["uid", "displayName", "provider", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII document storing the user's email and PayPal settlement email.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Primary account email address.",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "paypalEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "PayPal email for instant displacement refunds and cash-out payouts.",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when private info was updated."
+        }
+      },
+      "required": ["uid", "email", "paypalEmail", "updatedAt"]
+    },
+    "AuthorizedDomainRecord": {
+      "title": "AuthorizedDomainRecord",
+      "description": "Tracked Vercel or custom deployment domain registered by the admin (imtyroon@gmail.com).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the admin.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Hostname (e.g., hotseat.vercel.app) authorized for Firebase OAuth.",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "environment": {
+          "type": "string",
+          "description": "Deployment target environment.",
+          "enum": ["vercel-production", "vercel-preview", "custom-domain"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the domain record was added."
+        }
+      },
+      "required": ["ownerId", "domain", "environment", "createdAt"]
+    },
+    "AdminPayPalSettings": {
+      "title": "AdminPayPalSettings",
+      "description": "Admin-only PayPal mode & non-secret integration metadata managed by imtyroon@gmail.com.",
+      "type": "object",
+      "properties": {
+        "sandboxEnabled": {
+          "type": "boolean",
+          "description": "Whether PayPal Sandbox mode is enabled."
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["SANDBOX", "LIVE"],
+          "description": "Active PayPal API environment."
+        },
+        "clientIdPrefix": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 64,
+          "description": "Non-secret prefix of the configured PayPal Client ID."
+        },
+        "webhookId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Configured PayPal Webhook ID."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin settings were updated."
+        }
+      },
+      "required": ["sandboxEnabled", "environment", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public advertiser profile documents indexed by Firebase UID."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Strictly owner-only PII subcollection storing email and PayPal payout email."
+    },
+    "/users/{userId}/domains/{domainId}": {
+      "schema": { "$ref": "#/entities/AuthorizedDomainRecord" },
+      "description": "Admin-managed list of Vercel and custom domains configured for OAuth."
+    },
+    "/admin/{docId}": {
+      "schema": { "$ref": "#/entities/AdminPayPalSettings" },
+      "description": "Admin-only platform settings restricted to imtyroon@gmail.com."
+    }
+  }
+}

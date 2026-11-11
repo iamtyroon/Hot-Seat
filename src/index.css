@@ -1,0 +1,494 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-display: 'Big Shoulders Display', sans-serif;
+    --font-btn: 'Bricolage Grotesque', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-ui: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-hud: 'Barlow Condensed', 'Bricolage Grotesque', sans-serif;
+    --font-spray: 'Rubik Spray Paint', system-ui, sans-serif;
+    --font-wet: 'Rubik Wet Paint', system-ui, sans-serif;
+    --font-stencil: 'Black Ops One', system-ui, sans-serif;
+    --font-marker: 'Permanent Marker', cursive, sans-serif;
+    --font-block: 'Bungee', system-ui, sans-serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-ui);
+    background-color: #181A1F;
+    color: #F4F5F8;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  select {
+    font-family: var(--font-ui);
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-btn {
+  font-family: var(--font-btn);
+  letter-spacing: -0.01em;
+}
+
+.font-ui {
+  font-family: var(--font-ui);
+  letter-spacing: -0.005em;
+}
+
+.font-hud {
+  font-family: var(--font-hud);
+  letter-spacing: 0.03em;
+}
+
+.font-spray {
+  font-family: var(--font-spray);
+}
+
+.font-wet {
+  font-family: var(--font-wet);
+}
+
+.font-stencil {
+  font-family: var(--font-stencil);
+}
+
+.font-marker {
+  font-family: var(--font-marker);
+}
+
+.font-block {
+  font-family: var(--font-block);
+}
+
+.font-sans {
+  font-family: var(--font-sans);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chiseled Neo-Brutalist Street UI Button */
+.street-ui-btn {
+  font-family: var(--font-btn);
+  border: 2px solid #0E1014;
+  box-shadow: 2.5px 2.5px 0px #0E1014;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.street-ui-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3.5px 3.5px 0px #0E1014;
+}
+
+.street-ui-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px #0E1014;
+}
+
+/* Chiseled Wall Brick Surface Button */
+.wall-white-brick-btn {
+  font-family: var(--font-ui);
+  background-color: #F5F3EB;
+  color: #181B20;
+  border: 2.5px solid #1B1F24;
+  box-shadow: 3px 4px 0px rgba(27, 31, 36, 0.85), inset 0 2px 0px #FFFFFF;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease;
+}
+
+.dark .wall-white-brick-btn {
+  background-color: #21293B;
+  color: #F1F5F9;
+  border-color: #0D111A;
+  box-shadow: 3px 4px 0px #090C12, inset 0 1.5px 0px rgba(255, 255, 255, 0.14);
+}
+
+/* 3D Extruded Wildstyle Block Lettering */
+.graffiti-3d-extrude {
+  -webkit-text-stroke: 4.5px #111318;
+  paint-order: stroke fill;
+  text-shadow:
+    1px 1px 0px #111318,
+    2px 2px 0px #111318,
+    3px 4px 0px #111318,
+    5px 7px 0px #111318,
+    7px 10px 0px rgba(17, 19, 24, 0.85);
+}
+
+@media (max-width: 640px) {
+  .graffiti-3d-extrude {
+    -webkit-text-stroke: 2.5px #111318;
+    text-shadow:
+      1px 2px 0px #111318,
+      3px 4px 0px #111318;
+  }
+}
+
+/* Gentle Organic Breeze Sway for Hanging Ivy Vines */
+@keyframes vineBreezePrimary {
+  0%, 100% {
+    transform: rotate(-1.8deg) skewX(-1deg);
+  }
+  50% {
+    transform: rotate(2.4deg) skewX(1.5deg);
+  }
+}
+
+@keyframes vineBreezeSecondary {
+  0%, 100% {
+    transform: rotate(2.2deg) skewX(1.2deg);
+  }
+  50% {
+    transform: rotate(-2.6deg) skewX(-1.4deg);
+  }
+}
+
+@keyframes leafFlutter {
+  0%, 100% {
+    transform: rotate(0deg) scale(1);
+  }
+  35% {
+    transform: rotate(4deg) scale(1.02);
+  }
+  70% {
+    transform: rotate(-3deg) scale(0.99);
+  }
+}
+
+@keyframes treeCanopyBreeze {
+  0%, 100% {
+    transform: translateX(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateX(3px) rotate(1.2deg);
+  }
+}
+
+.animate-vine-primary {
+  transform-origin: top center;
+  animation: vineBreezePrimary 5.5s ease-in-out infinite;
+}
+
+.animate-vine-secondary {
+  transform-origin: top center;
+  animation: vineBreezeSecondary 6.8s ease-in-out infinite;
+}
+
+.animate-leaf-flutter {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: leafFlutter 3.6s ease-in-out infinite;
+}
+
+.animate-tree-breeze {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: treeCanopyBreeze 6s ease-in-out infinite;
+}
+
+/* Volumetric Lamp & Floodlight Glow Pulse */
+@keyframes lampWarmPulse {
+  0%, 100% {
+    opacity: 0.92;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-lamp-glow {
+  animation: lampWarmPulse 3.2s ease-in-out infinite;
+}
+
+@keyframes cartoonPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.84) rotate(var(--poster-rot, -1.5deg));
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.03) rotate(var(--poster-rot, -1.5deg));
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(var(--poster-rot, -1.5deg));
+  }
+}
+
+.animate-spray-in {
+  animation: cartoonPopIn 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ============================================================================
+   TWO-DRONE TAKEOVER DUEL (GYRO-STABILIZED AGENTIC UAVS & AEROSOL STREAM)
+   ============================================================================ */
+@keyframes paintCurtainSweep {
+  0% {
+    transform: translateX(-110%) skewX(-8deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.95;
+  }
+  65% {
+    transform: translateX(8%) skewX(-6deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(112%) skewX(-4deg);
+    opacity: 0;
+  }
+}
+
+@keyframes challengerDroneSweep {
+  0% {
+    opacity: 0;
+    transform: translate3d(-36vw, 14px, 0) rotate(6deg) scale(0.9);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(-18vw, -6px, 0) rotate(5deg) scale(1);
+  }
+  48% {
+    opacity: 1;
+    transform: translate3d(0vw, 4px, 0) rotate(3deg) scale(1.03);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(15vw, -4px, 0) rotate(1deg) scale(1);
+  }
+  92% {
+    opacity: 0.95;
+    transform: translate3d(23vw, -10px, 0) rotate(-2deg) scale(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(32vw, -18px, 0) rotate(-4deg) scale(0.9);
+  }
+}
+
+@keyframes defenderDroneWatch {
+  0% {
+    opacity: 0;
+    transform: translate3d(16vw, -8px, 0) rotate(0deg) scale(0.92);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(24vw, 2px, 0) rotate(-6deg) scale(1);
+  }
+  45% {
+    opacity: 1;
+    transform: translate3d(26vw, -4px, 0) rotate(-4deg) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(25vw, 4px, 0) rotate(-5deg) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(31vw, -16px, 0) rotate(4deg) scale(0.88);
+  }
+}
+
+@keyframes droneHoverPatrol {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0) rotate(-0.8deg);
+  }
+  50% {
+    transform: translate3d(0px, -6px, 0) rotate(1.2deg);
+  }
+}
+
+@keyframes rotorDiscSpin {
+  0%, 100% {
+    opacity: 0.62;
+    transform: scaleX(0.92);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scaleX(1.06);
+  }
+}
+
+@keyframes paintJetFlow {
+  0% {
+    stroke-dashoffset: 48;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes aerosolMistPulse {
+  0%, 100% {
+    opacity: 0.82;
+    transform: scale(0.97, 0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04, 1.05);
+  }
+}
+
+@keyframes tacticalMedalSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.94);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0px) scale(1);
+  }
+  88% {
+    opacity: 1;
+    transform: translateY(0px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+}
+
+@keyframes codmKillFlash {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-paint-curtain {
+  animation: paintCurtainSweep 3.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-challenger-drone {
+  animation: challengerDroneSweep 3.4s cubic-bezier(0.25, 1, 0.35, 1) forwards;
+}
+
+.animate-defender-drone {
+  animation: defenderDroneWatch 3.4s cubic-bezier(0.25, 1, 0.35, 1) forwards;
+}
+
+.animate-drone-patrol {
+  animation: droneHoverPatrol 3.6s ease-in-out infinite;
+}
+
+.animate-rotor-disc {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rotorDiscSpin 0.11s linear infinite;
+}
+
+.animate-paint-stream {
+  animation: paintJetFlow 0.28s linear infinite;
+}
+
+.animate-spray-cone {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: aerosolMistPulse 0.32s ease-in-out infinite;
+}
+
+.animate-tactical-medal {
+  animation: tacticalMedalSlide 3.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-codm-kill {
+  animation: codmKillFlash 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Call of Duty screenshot-style feathered right-edge kill-feed bar */
+.cod-kill-row-feather {
+  mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.96) 84%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.96) 84%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* 2.5D Pedestrians Walking & Articulated Limb Swing */
+@keyframes walkRight {
+  0% {
+    transform: translateX(-6vw);
+  }
+  100% {
+    transform: translateX(104vw);
+  }
+}
+
+@keyframes walkLeft {
+  0% {
+    transform: translateX(104vw) scaleX(-1);
+  }
+  100% {
+    transform: translateX(-6vw) scaleX(-1);
+  }
+}
+
+@keyframes bobWalk {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes strideFront {
+  0%, 100% {
+    transform: rotate(-16deg);
+  }
+  50% {
+    transform: rotate(16deg);
+  }
+}
+
+@keyframes strideBack {
+  0%, 100% {
+    transform: rotate(16deg);
+  }
+  50% {
+    transform: rotate(-16deg);
+  }
+}
+
+.pedestrian-walk-right {
+  animation: walkRight var(--walk-dur, 36s) linear infinite;
+  animation-delay: var(--walk-delay, 0s);
+}
+
+.pedestrian-walk-left {
+  animation: walkLeft var(--walk-dur, 40s) linear infinite;
+  animation-delay: var(--walk-delay, 0s);
+}
+
+.pedestrian-bob {
+  animation: bobWalk 0.52s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
+}
+
+.limb-stride-a {
+  transform-box: fill-box;
+  transform-origin: top center;
+  animation: strideFront 0.52s ease-in-out infinite;
+}
+
+.limb-stride-b {
+  transform-box: fill-box;
+  transform-origin: top center;
+  animation: strideBack 0.52s ease-in-out infinite;
+}
