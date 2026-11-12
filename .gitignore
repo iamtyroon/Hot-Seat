@@ -16,3 +16,4 @@ firebase-applet-config.json
 firebase_applet_config.xml
 !firebase-applet-config.example.json
 
+.vercel
