@@ -342,7 +342,6 @@ export function App() {
     sprayThemeIndex: number;
     templateId: string;
     topUpDollars: number;
-    autoConfirmWebhook: boolean;
     snipeImmediatelyOnDeploy?: boolean;
   }) => {
     const res = await fetch('/api/agents/deploy', {
@@ -382,27 +381,15 @@ export function App() {
 
   const handleCreateTopUpOrder = async (
     agentId: string,
-    amountDollars: number,
-    autoConfirmWebhook: boolean
+    amountDollars: number
   ) => {
     const res = await fetch('/api/paypal/orders/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentId, amountDollars, autoConfirmWebhook }),
+      body: JSON.stringify({ agentId, amountDollars }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Order creation failed');
-    if (data.snapshot) setSnapshot(data.snapshot);
-  };
-
-  const handleConfirmOrderWebhook = async (orderId: string) => {
-    const res = await fetch('/api/paypal/webhooks/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Webhook confirmation failed');
     if (data.snapshot) setSnapshot(data.snapshot);
   };
 
@@ -430,7 +417,7 @@ export function App() {
     });
     const data = await res.json();
     if (data.snapshot) setSnapshot(data.snapshot);
-    const totalV = data.totalWallViewsCount || (snapshot?.billboard.totalWallViewsCount || 100) + count;
+    const totalV = data.totalWallViewsCount || (snapshot?.billboard.totalWallViewsCount || 0) + count;
     const tinyCount = Math.floor(totalV / 10);
     showToast(
       `+${count} Views added (${totalV} Views total → ${tinyCount} Tiny People on the street at 10:1 ratio)!`
@@ -521,7 +508,6 @@ export function App() {
           }}
           onFastForwardCooling={handleFastForwardCooling}
           onCreateTopUpOrder={handleCreateTopUpOrder}
-          onConfirmOrderWebhook={handleConfirmOrderWebhook}
           onCashOutPayout={handleCashOutPayout}
           onboardingStep={onboardingStep}
           onAdvanceOnboarding={handleAdvanceOnboarding}

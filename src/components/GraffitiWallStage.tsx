@@ -1055,7 +1055,7 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
   };
 
   // Exact 10-to-1 Viewer-to-Tiny-Person Telemetry
-  const totalViews = billboard.totalWallViewsCount || 100;
+  const totalViews = billboard.totalWallViewsCount || 0;
   const tinyPeopleCount = Math.min(80, Math.max(1, Math.floor(totalViews / 10)));
 
   const dayBrickTones = ['#F9F8F3', '#F2F0E8', '#FFFFFF', '#ECE9DF', '#F6F4EC'];

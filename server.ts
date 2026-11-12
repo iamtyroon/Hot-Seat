@@ -573,6 +573,9 @@ function seedInitialArena() {
     'BASE RATE'
   );
 
+  // Production starts without fabricated rival agents or balances.
+  if (process.env.VERCEL === '1') return;
+
   // Seed 4 distinct competitive startup agents so the arena is immediately battling
   const seededRivals = [
     {
@@ -763,7 +766,7 @@ function seedInitialArena() {
 
 seedInitialArena();
 
-let totalWallViewsCount = 100; // 100 views = 10 tiny people on the street (exact 10:1 ratio)
+  let totalWallViewsCount = process.env.VERCEL === '1' ? 0 : 100;
 
 const sseClients = new Set<express.Response>();
 
@@ -772,7 +775,7 @@ function getArenaSnapshot(): any {
   const boardRow = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
   const metrics = computePriceMetrics(boardRow, nowMs);
 
-  const activeViewersCount = Math.max(1, sseClients.size);
+  const activeViewersCount = sseClients.size;
 
   const billboard = {
     currentHolderAgentId: metrics.hasActiveHolder ? boardRow.current_holder_agent_id : null,
@@ -922,10 +925,11 @@ function getArenaSnapshot(): any {
 
   return {
     serverTimeMs: nowMs,
-    paypalMode:
-      hasLivePayPalCredentials && !runtimePayPalConfig.sandboxEnabled
-        ? 'LIVE_SANDBOX_API'
-        : 'SANDBOX_SIMULATION',
+    paypalMode: runtimePayPalConfig.sandboxEnabled
+      ? 'SANDBOX_API'
+      : hasLivePayPalCredentials
+      ? 'LIVE_PRODUCTION_API'
+      : 'LIVE_MODE_AWAITING_KEYS',
     paypalMcpEndpoint: runtimePayPalConfig.mcpEndpoint,
     billboard,
     wallLayers,
@@ -1131,12 +1135,13 @@ const ADMIN_EMAIL = 'imtyroon@gmail.com';
 
 const runtimePayPalConfig = {
   sandboxEnabled:
-    (process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_ENV || 'SANDBOX').toUpperCase() !==
-    'LIVE',
+    process.env.VERCEL !== '1' &&
+    (process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_ENV || 'LIVE').toUpperCase() ===
+      'SANDBOX',
   clientId: process.env.PAYPAL_CLIENT_ID || '',
   clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
   webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
-  mcpEndpoint: process.env.PAYPAL_MCP_ENDPOINT || 'https://mcp.sandbox.paypal.com/mcp',
+  mcpEndpoint: process.env.PAYPAL_MCP_ENDPOINT || 'https://mcp.paypal.com/http',
 };
 
 function getPayPalEnvironment(): 'LIVE' | 'SANDBOX' {
@@ -1149,13 +1154,7 @@ function getPayPalApiBaseUrl(): string {
     : 'https://api-m.sandbox.paypal.com';
 }
 
-function getPayPalCheckoutBaseUrl(): string {
-  return getPayPalEnvironment() === 'LIVE'
-    ? 'https://www.paypal.com'
-    : 'https://www.sandbox.paypal.com';
-}
-
-async function getPayPalSandboxAccessToken(): Promise<string | null> {
+async function getPayPalAccessToken(): Promise<string | null> {
   const clientId = runtimePayPalConfig.clientId;
   const clientSecret = runtimePayPalConfig.clientSecret;
   if (!clientId || !clientSecret) return null;
@@ -1185,7 +1184,7 @@ async function buildPayPalStatusResponse() {
   const environment = getPayPalEnvironment();
   let tokenVerified = false;
   if (configured) {
-    const token = await getPayPalSandboxAccessToken();
+    const token = await getPayPalAccessToken();
     tokenVerified = Boolean(token);
   }
   const modeLabel = runtimePayPalConfig.sandboxEnabled
@@ -1193,8 +1192,10 @@ async function buildPayPalStatusResponse() {
       ? 'SANDBOX API CONNECTED'
       : 'SANDBOX DEMO ACTIVE'
     : configured
-    ? 'LIVE PRODUCTION API'
-    : 'LIVE MODE (AWAITING KEYS)';
+      ? tokenVerified
+        ? 'LIVE PAYPAL API CONNECTED'
+        : 'LIVE PAYPAL KEYS INVALID'
+      : 'LIVE MODE · PRODUCTION KEYS REQUIRED';
 
   return {
     configured,
@@ -1213,12 +1214,30 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
+  app.use('/api', (req, res, next) => {
+    if (
+      process.env.VERCEL === '1' &&
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
+      req.path !== '/ai/compile-strategy'
+    ) {
+      res.status(503).json({
+        error: 'Live arena storage is not configured. No changes or payments were processed.',
+      });
+      return;
+    }
+    next();
+  });
+
   app.get('/api/paypal/status', async (_req, res) => {
     const status = await buildPayPalStatusResponse();
     res.json(status);
   });
 
   app.post('/api/paypal/admin-config', async (req, res) => {
+    if (process.env.VERCEL === '1') {
+      res.status(403).json({ error: 'Manage production PayPal credentials in Vercel environment settings.' });
+      return;
+    }
     try {
       const { adminEmail, sandboxEnabled, clientId, clientSecret, webhookId, mcpEndpoint } =
         req.body || {};
@@ -1550,7 +1569,12 @@ Billboard rules context:
       }
     }
 
-    const lower = goalPlainEnglish.toLowerCase();
+      if (process.env.VERCEL === '1') {
+        res.status(503).json({ error: 'Gemini production access is not configured.' });
+        return;
+      }
+
+      const lower = goalPlainEnglish.toLowerCase();
     const isAggro =
       lower.includes('fight') ||
       lower.includes('kick') ||
@@ -1602,6 +1626,10 @@ Billboard rules context:
 
   app.post('/api/ai/narrate-war', async (_req, res) => {
     const ai = getGenAIClient();
+    if (!ai && process.env.VERCEL === '1') {
+      res.status(503).json({ error: 'Gemini production access is not configured.' });
+      return;
+    }
     const snap = getArenaSnapshot();
     const recentTakeovers = snap.battleLogs
       .filter((b: any) => b.category === 'TAKEOVER')
@@ -1679,7 +1707,6 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
         sprayThemeIndex,
         templateId,
         topUpDollars,
-        autoConfirmWebhook,
       } = req.body;
 
       if (!companyName || !companyUrl || !compiledStrategy) {
@@ -1719,7 +1746,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       ).run(
         agentId,
         ownerName || 'Judge / Founder',
-        paypalEmail || 'judge-sandbox@paypal.com',
+        paypalEmail || '',
         companyName.toUpperCase(),
         cleanUrl,
         cleanLogoDataUrl,
@@ -1738,11 +1765,10 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       const orderResult = await createPayPalOrderForAgent(
         agentId,
         companyName.toUpperCase(),
-        amountCents,
-        Boolean(autoConfirmWebhook)
+        amountCents
       );
 
-      if (Boolean(autoConfirmWebhook) && req.body.snipeImmediatelyOnDeploy !== false) {
+      if (req.body.snipeImmediatelyOnDeploy !== false) {
         try {
           executeAtomicTakeover({
             buyerAgentId: agentId,
@@ -1846,58 +1872,40 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     res.json({ ok: true, snapshot: getArenaSnapshot() });
   });
 
-  async function createPayPalOrderForAgent(
-    agentId: string,
-    companyName: string,
-    amountCents: number,
-    autoConfirmWebhook: boolean
-  ) {
+  async function createPayPalOrderForAgent(agentId: string, companyName: string, amountCents: number) {
     const nowMs = Date.now();
     const amountDollars = (amountCents / 100).toFixed(2);
-    const accessToken = await getPayPalSandboxAccessToken();
+    const accessToken = await getPayPalAccessToken();
+    if (!accessToken) throw new Error('Live PayPal credentials are missing or invalid.');
 
-    let orderId = `PAYPAL-${getPayPalEnvironment() === 'LIVE' ? 'LIVE' : 'SBX'}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-    let approveUrl = `${getPayPalCheckoutBaseUrl()}/checkoutnow?token=${orderId}`;
-    let mode: 'LIVE_SANDBOX_API' | 'SANDBOX_SIMULATION' = 'SANDBOX_SIMULATION';
-
-    if (accessToken) {
-      try {
-        const ppRes = await fetch(`${getPayPalApiBaseUrl()}/v2/checkout/orders`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
+    const ppRes = await fetch(`${getPayPalApiBaseUrl()}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [
+          {
+            reference_id: agentId,
+            description: `Hot Seat Agent Prepaid Balance Top-Up (${companyName})`,
+            amount: { currency_code: 'USD', value: amountDollars },
           },
-          body: JSON.stringify({
-            intent: 'CAPTURE',
-            purchase_units: [
-              {
-                reference_id: agentId,
-                description: `Hot Seat Agent Prepaid Balance Top-Up (${companyName})`,
-                amount: {
-                  currency_code: 'USD',
-                  value: amountDollars,
-                },
-              },
-            ],
-          }),
-        });
-        if (ppRes.ok) {
-          const ppData = (await ppRes.json()) as any;
-          if (ppData.id) {
-            orderId = ppData.id;
-            mode = 'LIVE_SANDBOX_API';
-            const link = (ppData.links || []).find((l: any) => l.rel === 'approve');
-            if (link?.href) approveUrl = link.href;
-          }
-        }
-      } catch {
-        // Fallback to simulation order ID
-      }
-    }
+        ],
+      }),
+    });
+    if (!ppRes.ok) throw new Error('PayPal live order creation failed.');
+    const ppData = (await ppRes.json()) as any;
+    const orderId = ppData.id;
+    const approveUrl = (ppData.links || []).find((l: any) => l.rel === 'approve')?.href;
+    if (!orderId || !approveUrl) throw new Error('PayPal returned an incomplete live order.');
+    const mode: 'LIVE_PRODUCTION_API' | 'SANDBOX_API' = runtimePayPalConfig.sandboxEnabled
+      ? 'SANDBOX_API'
+      : 'LIVE_PRODUCTION_API';
 
     const mcpPayload = {
-      mcpServer: process.env.PAYPAL_MCP_ENDPOINT || 'https://mcp.sandbox.paypal.com/mcp',
+      mcpServer: runtimePayPalConfig.mcpEndpoint,
       tool: 'create_order',
       arguments: {
         intent: 'CAPTURE',
@@ -1937,91 +1945,18 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       nowMs
     );
 
-    if (autoConfirmWebhook) {
-      confirmPayPalOrderWebhook(orderId);
-    }
-
     return {
       orderId,
       amountCents,
       mode,
       approveUrl,
-      status: autoConfirmWebhook ? 'WEBHOOK_CONFIRMED' : 'CREATED_AWAITING_WEBHOOK',
+      status: 'CREATED_AWAITING_WEBHOOK',
     };
-  }
-
-  function confirmPayPalOrderWebhook(orderId: string) {
-    const nowMs = Date.now();
-    const order = db
-      .prepare('SELECT * FROM paypal_orders WHERE order_id = ?')
-      .get(orderId) as any;
-
-    if (!order) {
-      throw new Error(`Order ${orderId} not found.`);
-    }
-    if (order.status === 'WEBHOOK_CONFIRMED') {
-      return { alreadyConfirmed: true };
-    }
-
-    const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(order.agent_id) as any;
-    if (!agent) {
-      throw new Error('Agent for order not found.');
-    }
-
-    const newBalance = agent.balance_cents + order.amount_cents;
-
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE paypal_orders SET status = 'WEBHOOK_CONFIRMED' WHERE order_id = ?").run(
-        orderId
-      );
-      db.prepare('UPDATE agents SET balance_cents = ?, last_decision_text = ? WHERE id = ?').run(
-        newBalance,
-        `Funded +$${(order.amount_cents / 100).toFixed(2)} via PayPal Order ${orderId}`,
-        agent.id
-      );
-
-      db.prepare(
-        `INSERT INTO ledger_entries
-         (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
-         VALUES (?, ?, ?, ?, 'PAYPAL_TOPUP', ?, ?, ?, 'webhook:PAYMENT.CAPTURE.COMPLETED', ?, ?)`
-      ).run(
-        crypto.randomUUID(),
-        `webhook-confirm-${orderId}`,
-        agent.id,
-        agent.company_name,
-        order.amount_cents,
-        newBalance,
-        orderId,
-        `PayPal Webhook PAYMENT.CAPTURE.COMPLETED confirmed +$${(
-          order.amount_cents / 100
-        ).toFixed(2)} top-up`,
-        nowMs
-      );
-
-      insertBattleLog(
-        agent.id,
-        agent.company_name,
-        'PAYPAL_MCP',
-        `PayPal Webhook PAYMENT.CAPTURE.COMPLETED verified for Order ${orderId}: credited +$${(
-          order.amount_cents / 100
-        ).toFixed(2)} to ${agent.company_name} wallet (New balance: $${(newBalance / 100).toFixed(
-          2
-        )}).`,
-        computePriceMetrics(
-          db.prepare('SELECT * FROM billboard_state WHERE id = 1').get(),
-          nowMs
-        ).currentDecayedRateCentsPerMin,
-        nowMs
-      );
-    });
-
-    tx();
-    return { alreadyConfirmed: false, newBalance };
   }
 
   app.post('/api/paypal/orders/create', async (req, res) => {
     try {
-      const { agentId, amountDollars, autoConfirmWebhook } = req.body;
+      const { agentId, amountDollars } = req.body;
       const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
       if (!agent) {
         res.status(404).json({ error: 'Agent not found.' });
@@ -2029,12 +1964,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       }
 
       const amountCents = Math.max(100, Math.round((Number(amountDollars) || 5) * 100));
-      const order = await createPayPalOrderForAgent(
-        agent.id,
-        agent.company_name,
-        amountCents,
-        Boolean(autoConfirmWebhook)
-      );
+      const order = await createPayPalOrderForAgent(agent.id, agent.company_name, amountCents);
 
       broadcastSnapshot();
       res.json({ ok: true, order, snapshot: getArenaSnapshot() });
@@ -2043,15 +1973,8 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     }
   });
 
-  app.post('/api/paypal/webhooks/confirm', (req, res) => {
-    try {
-      const { orderId } = req.body;
-      const result = confirmPayPalOrderWebhook(orderId);
-      broadcastSnapshot();
-      res.json({ ok: true, result, snapshot: getArenaSnapshot() });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message || 'Webhook confirmation failed.' });
-    }
+  app.post('/api/paypal/webhooks/confirm', (_req, res) => {
+    res.status(503).json({ error: 'Signed PayPal webhook verification is not configured.' });
   });
 
   app.post('/api/paypal/payouts/cashout', async (req, res) => {
@@ -2070,12 +1993,10 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       const payoutAmountCents = agent.balance_cents;
       const payoutDollars = (payoutAmountCents / 100).toFixed(2);
       const nowMs = Date.now();
-      let payoutBatchId = `PAYOUT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-
-      const accessToken = await getPayPalSandboxAccessToken();
-      if (accessToken) {
-        try {
-          const ppRes = await fetch(`${getPayPalApiBaseUrl()}/v1/payments/payouts`, {
+      if (!agent.paypal_email) throw new Error('A PayPal payout email is required.');
+      const accessToken = await getPayPalAccessToken();
+      if (!accessToken) throw new Error('Live PayPal credentials are missing or invalid.');
+      const ppRes = await fetch(`${getPayPalApiBaseUrl()}/v1/payments/payouts`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${accessToken}`,
@@ -2095,17 +2016,11 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
                 },
               ],
             }),
-          });
-          if (ppRes.ok) {
-            const data = (await ppRes.json()) as any;
-            if (data.batch_header?.payout_batch_id) {
-              payoutBatchId = data.batch_header.payout_batch_id;
-            }
-          }
-        } catch {
-          // Use sandbox batch ID
-        }
-      }
+      });
+      if (!ppRes.ok) throw new Error('PayPal live payout request failed.');
+      const payoutData = (await ppRes.json()) as any;
+      const payoutBatchId = payoutData.batch_header?.payout_batch_id;
+      if (!payoutBatchId) throw new Error('PayPal returned no payout batch ID.');
 
       const tx = db.transaction(() => {
         db.prepare(

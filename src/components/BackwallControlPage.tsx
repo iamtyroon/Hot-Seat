@@ -103,7 +103,6 @@ interface BackwallControlPageProps {
     sprayThemeIndex: number;
     templateId: AdTemplateId;
     topUpDollars: number;
-    autoConfirmWebhook: boolean;
     snipeImmediatelyOnDeploy?: boolean;
   }) => Promise<void>;
   onUpdateAgent: (
@@ -121,10 +120,8 @@ interface BackwallControlPageProps {
   onFastForwardCooling: (minutes: number) => Promise<void>;
   onCreateTopUpOrder: (
     agentId: string,
-    amountDollars: number,
-    autoConfirmWebhook: boolean
+    amountDollars: number
   ) => Promise<void>;
-  onConfirmOrderWebhook: (orderId: string) => Promise<void>;
   onCashOutPayout: (agentId: string) => Promise<void>;
   onboardingStep?: number;
   onAdvanceOnboarding?: (nextStep: number) => void;
@@ -145,7 +142,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
   onManualTakeover,
   onFastForwardCooling,
   onCreateTopUpOrder,
-  onConfirmOrderWebhook,
   onCashOutPayout,
   onboardingStep = 0,
   onAdvanceOnboarding,
@@ -198,7 +194,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
   const [snipeImmediatelyOnDeploy, setSnipeImmediatelyOnDeploy] = useState<boolean>(true);
   const [showAiAssistant, setShowAiAssistant] = useState<boolean>(false);
   const [goalPlainEnglish, setGoalPlainEnglish] = useState('');
-  const [autoConfirmWebhook] = useState<boolean>(true);
 
   const [isCompiling, setIsCompiling] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
@@ -296,7 +291,11 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
 
   const handleStartOAuthSignIn = async (provider: 'google' | 'paypal') => {
     setAuthNotice(null);
-    if (provider === 'google') {
+    if (provider !== 'google') {
+      setAuthNotice('PayPal sign-in is not configured. Use Firebase Google sign-in.');
+      return;
+    }
+    {
       setIsGooglePopupLoading(true);
       try {
         const synced = await signInWithGooglePopup();
@@ -327,35 +326,32 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
       }
     }
 
-    setAuthProviderPrompt(provider);
-    setShowAuthDrawer(true);
-    setAuthNameInput(provider === 'google' ? 'Tyroon' : 'Tyroon (PayPal Sandbox)');
-    setAuthEmailInput(
-      provider === 'google' ? 'imtyroon@gmail.com' : 'imtyroon-sandbox@paypal.com'
-    );
+      setAuthProviderPrompt(provider);
+      setShowAuthDrawer(true);
   };
 
   const handleCompleteSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authProviderPrompt) return;
-    const cleanEmail = authEmailInput.trim() || 'founder@startup.io';
-    const cleanName =
-      authNameInput.trim() || cleanEmail.split('@')[0] || 'Founder';
-
-    if (auth.currentUser) {
-      await syncFirebaseUserToFirestore(auth.currentUser, cleanEmail).catch(() => {});
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) {
+      setAuthNotice('Complete Firebase Google sign-in before continuing.');
+      return;
     }
-
+    const synced = await syncFirebaseUserToFirestore(
+      firebaseUser,
+      firebaseUser.email || ''
+    );
     const newAccount: UserAccount = {
-      id: auth.currentUser?.uid || `usr_${Date.now().toString(36)}`,
-      name: cleanName,
-      email: cleanEmail,
-      provider: authProviderPrompt,
-      paypalEmail: cleanEmail,
-      firebaseUid: auth.currentUser?.uid,
+      id: synced.uid,
+      name: synced.name,
+      email: synced.email,
+      provider: 'google',
+      paypalEmail: synced.paypalEmail,
+      firebaseUid: synced.uid,
     };
     onSignIn(newAccount);
-    setPaypalEmail(cleanEmail);
+    setPaypalEmail(synced.paypalEmail);
     setAuthProviderPrompt(null);
     setShowAuthDrawer(false);
   };
@@ -583,7 +579,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
       await onDeployAgent({
         ownerName: userAccount?.name || 'Founder',
         paypalEmail:
-          paypalEmail.trim() || userAccount?.paypalEmail || 'founder-sandbox@paypal.com',
+          paypalEmail.trim() || userAccount?.paypalEmail || '',
         companyName: companyName.trim(),
         companyUrl: companyUrl.trim(),
         logoDataUrl,
@@ -596,7 +592,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         sprayThemeIndex,
         templateId: selectedTemplateId,
         topUpDollars,
-        autoConfirmWebhook,
         snipeImmediatelyOnDeploy,
       });
       if (onboardingStep > 0 && onAdvanceOnboarding) {
@@ -1508,7 +1503,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                                 onClick={async () => {
                                   setBusyId(`topup-${agent.id}`);
                                   try {
-                                    await onCreateTopUpOrder(agent.id, 5, true);
+                                    await onCreateTopUpOrder(agent.id, 5);
                                   } finally {
                                     setBusyId(null);
                                   }
@@ -1578,14 +1573,6 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                             {ord.orderId} · {ord.companyName} (+$
                             {(ord.amountCents / 100).toFixed(2)})
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => onConfirmOrderWebhook(ord.orderId)}
-                            className="px-2.5 py-1 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                            <span>Confirm Webhook</span>
-                          </button>
                         </div>
                       ))}
                   </div>
@@ -1823,7 +1810,8 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 )}
               </div>
 
-              {/* 2. PayPal API Configuration & Sandbox ON/OFF Toggle (Admin Only) */}
+              {/* Local development PayPal controls only. Production credentials belong in Vercel. */}
+              {!import.meta.env.PROD && (
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-[#171C28]/60 p-4 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -2014,6 +2002,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                   )}
                 </form>
               </div>
+              )}
             </div>
           )}
         </div>

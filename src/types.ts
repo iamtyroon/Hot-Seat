@@ -138,7 +138,7 @@ export interface PayPalPendingOrder {
   companyName: string;
   amountCents: number;
   status: 'CREATED_AWAITING_WEBHOOK' | 'WEBHOOK_CONFIRMED';
-  mode: 'LIVE_SANDBOX_API' | 'SANDBOX_SIMULATION';
+  mode: 'LIVE_PRODUCTION_API' | 'SANDBOX_API';
   mcpPayloadJson: string;
   approveUrl: string;
   createdAtMs: number;
@@ -146,7 +146,7 @@ export interface PayPalPendingOrder {
 
 export interface ArenaSnapshot {
   serverTimeMs: number;
-  paypalMode: 'LIVE_SANDBOX_API' | 'SANDBOX_SIMULATION';
+  paypalMode: 'LIVE_PRODUCTION_API' | 'LIVE_MODE_AWAITING_KEYS' | 'SANDBOX_API';
   paypalMcpEndpoint: string;
   billboard: BillboardState;
   wallLayers: WallLayer[];

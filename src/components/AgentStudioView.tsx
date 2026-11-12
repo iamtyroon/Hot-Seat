@@ -44,7 +44,6 @@ interface AgentStudioViewProps {
     sprayThemeIndex: number;
     templateId: AdTemplateId;
     topUpDollars: number;
-    autoConfirmWebhook: boolean;
   }) => Promise<void>;
   onUpdateAgent: (
     agentId: string,
@@ -77,7 +76,14 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
   const [goalPlainEnglish, setGoalPlainEnglish] = useState('');
   const [dailyBudgetDollars, setDailyBudgetDollars] = useState<number>(5);
   const [topUpDollars, setTopUpDollars] = useState<number>(5);
-  const [autoConfirmWebhook, setAutoConfirmWebhook] = useState<boolean>(true);
+
+  if (import.meta.env.PROD) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-slate-700 dark:text-slate-200">
+        Live agent deployment is unavailable until persistent Firestore storage is configured.
+      </div>
+    );
+  }
 
   const handleStudioLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -164,7 +170,7 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
         activeHeadline.trim() || `${companyName.trim().toUpperCase()} ON THE WALL`;
       await onDeployAgent({
         ownerName: ownerName.trim() || 'Founder',
-        paypalEmail: paypalEmail.trim() || 'founder-sandbox@paypal.com',
+        paypalEmail: paypalEmail.trim(),
         companyName: companyName.trim(),
         companyUrl: companyUrl.trim(),
         logoDataUrl,
@@ -177,7 +183,6 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
         sprayThemeIndex: 0,
         templateId: 'BOMB_BURST',
         topUpDollars,
-        autoConfirmWebhook,
       });
       onSwitchToArena();
     } catch (err: any) {
@@ -249,11 +254,12 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-[#1E293B] mb-1">
-                    PayPal Sandbox Email (For Cash-Out)
+                    PayPal Email (For Cash-Out)
                   </label>
                   <input
                     type="email"
-                    placeholder="you-sandbox@paypal.com"
+                    placeholder="you@example.com"
+                    required
                     value={paypalEmail}
                     onChange={(e) => setPaypalEmail(e.target.value)}
                     className="w-full bg-white border-2 border-[#1B1F24] rounded-xs px-3 py-2 text-sm font-mono text-[#141414] focus:outline-none"
@@ -365,17 +371,6 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
               ))}
             </div>
 
-            <label className="flex items-center gap-2 text-xs font-mono text-[#1E293B] cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoConfirmWebhook}
-                onChange={(e) => setAutoConfirmWebhook(e.target.checked)}
-                className="accent-[#1B4332]"
-              />
-              <span>
-                Auto-verify <code className="font-bold">PAYMENT.CAPTURE.COMPLETED</code> sandbox webhook on deploy
-              </span>
-            </label>
           </div>
         </div>
 

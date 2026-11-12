@@ -8,7 +8,7 @@ interface EmbedAndQrViewProps {
 export const EmbedAndQrView: React.FC<EmbedAndQrViewProps> = ({ onOpenDeployStudio }) => {
   const [copied, setCopied] = useState(false);
   const appOrigin =
-    typeof window !== 'undefined' ? window.location.origin : 'https://hotseat.demo';
+    typeof window !== 'undefined' ? window.location.origin : '';
   const embedUrl = `${appOrigin}/?embed=1`;
   const iframeSnippet = `<iframe src="${embedUrl}" width="100%" height="540" style="border:0;border-radius:8px;overflow:hidden;" title="Hot Seat Live AI Agent Billboard"></iframe>`;
 

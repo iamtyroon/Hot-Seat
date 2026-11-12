@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArenaSnapshot } from '../types';
 import {
   DollarSign,
-  CheckCircle2,
   ArrowUpRight,
-  RefreshCw,
   Terminal,
   ShieldCheck,
 } from 'lucide-react';
@@ -13,24 +11,20 @@ interface PayPalLedgerViewProps {
   snapshot: ArenaSnapshot;
   onCreateTopUpOrder: (
     agentId: string,
-    amountDollars: number,
-    autoConfirmWebhook: boolean
+    amountDollars: number
   ) => Promise<void>;
-  onConfirmOrderWebhook: (orderId: string) => Promise<void>;
   onCashOutPayout: (agentId: string) => Promise<void>;
 }
 
 export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
   snapshot,
   onCreateTopUpOrder,
-  onConfirmOrderWebhook,
   onCashOutPayout,
 }) => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
     snapshot.agents[0]?.id || ''
   );
   const [topUpDollars, setTopUpDollars] = useState<number>(5);
-  const [requireManualWebhook, setRequireManualWebhook] = useState<boolean>(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -40,34 +34,23 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
     }
   }, [snapshot.agents, selectedAgentId]);
 
+  if (import.meta.env.PROD) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-slate-700 dark:text-slate-200">
+        Live payments are unavailable until persistent Firestore storage and signed PayPal webhook verification are configured.
+      </div>
+    );
+  }
+
   const handleCreateOrder = async () => {
     if (!selectedAgentId) return;
     setBusyId('create-order');
     setStatusMessage(null);
     try {
-      await onCreateTopUpOrder(selectedAgentId, topUpDollars, !requireManualWebhook);
-      setStatusMessage(
-        requireManualWebhook
-          ? `Created PayPal Sandbox Order for $${topUpDollars.toFixed(
-              2
-            )} via Agent Toolkit MCP. Click "Confirm Webhook" below to credit balance.`
-          : `Created and webhook-confirmed $${topUpDollars.toFixed(2)} PayPal Sandbox Order.`
-      );
+      await onCreateTopUpOrder(selectedAgentId, topUpDollars);
+      setStatusMessage(`Created live PayPal order for $${topUpDollars.toFixed(2)}.`);
     } catch (err: any) {
       setStatusMessage(err.message || 'Order creation failed.');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleWebhookConfirm = async (orderId: string) => {
-    setBusyId(orderId);
-    setStatusMessage(null);
-    try {
-      await onConfirmOrderWebhook(orderId);
-      setStatusMessage(`Webhook PAYMENT.CAPTURE.COMPLETED verified for ${orderId}.`);
-    } catch (err: any) {
-      setStatusMessage(err.message || 'Webhook verification failed.');
     } finally {
       setBusyId(null);
     }
@@ -142,7 +125,7 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
 
       {/* Middle 2-Column Split: PayPal Order & Webhook Simulator + Agent Wallet Payouts */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        {/* Left 6 Cols: Create PayPal Sandbox Order & Inspect MCP Tool Call */}
+        {/* Left 6 Cols: Create PayPal Order & Inspect Tool Call */}
         <div className="lg:col-span-6 bg-[#FFFDF7] border-[3px] border-[#1B1F24] shadow-[5px_5px_0px_#1B1F24] rounded-xs overflow-hidden flex flex-col justify-between">
           <div>
             <div className="bg-[#181B20] text-[#F4F5F8] px-5 py-3 border-b-[3px] border-[#1B1F24] flex items-center justify-between">
@@ -196,18 +179,6 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
                     </div>
                   </div>
 
-                  <label className="flex items-center gap-2 text-xs font-mono text-[#1E293B] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={requireManualWebhook}
-                      onChange={(e) => setRequireManualWebhook(e.target.checked)}
-                      className="accent-[#1B4332]"
-                    />
-                    <span>
-                      Two-step demo: hold order in <code className="font-bold">CREATED_AWAITING_WEBHOOK</code> state until webhook fires
-                    </span>
-                  </label>
-
                   <button
                     type="button"
                     disabled={busyId !== null || !selectedAgentId}
@@ -215,7 +186,7 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
                     className="w-full py-2.5 px-4 bg-[#1B4332] hover:bg-[#143325] text-[#FFE66D] border-2 border-[#1B1F24] shadow-[3px_3px_0px_#1B1F24] font-mono font-black uppercase text-xs rounded-xs transition-all inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     <DollarSign className="w-4 h-4" />
-                    <span>Create PayPal Sandbox Order (${topUpDollars.toFixed(2)})</span>
+                    <span>Create PayPal Order (${topUpDollars.toFixed(2)})</span>
                   </button>
                 </>
               )}
@@ -245,22 +216,6 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
                           +${(ord.amountCents / 100).toFixed(2)}
                         </span>
                       </div>
-                      {ord.status === 'CREATED_AWAITING_WEBHOOK' ? (
-                        <button
-                          type="button"
-                          disabled={busyId === ord.orderId}
-                          onClick={() => handleWebhookConfirm(ord.orderId)}
-                          className="px-2.5 py-1 text-[11px] font-mono font-black uppercase bg-[#FFE66D] text-[#141414] border border-[#1B1F24] rounded-xs inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          <span>Confirm Webhook</span>
-                        </button>
-                      ) : (
-                        <span className="text-[11px] font-mono font-bold text-[#1B4332] inline-flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>WEBHOOK_CONFIRMED</span>
-                        </span>
-                      )}
                     </div>
                     <pre className="text-[10px] font-mono text-[#E2E8F0] bg-[#181B20] p-2 rounded-xs overflow-x-auto">
                       {ord.mcpPayloadJson}
