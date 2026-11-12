@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ArenaSnapshot,
   CompiledStrategy,
@@ -6,6 +6,7 @@ import {
   AdTemplateId,
 } from '../types';
 import { LiveRateChart } from './LiveRateChart';
+import { TourProgress, TOUR_DONE_STEP, prefersReducedMotion } from './OnboardingTour';
 import {
   auth,
   signInWithGooglePopup,
@@ -44,6 +45,9 @@ import {
   ShieldCheck,
   Copy,
   Check,
+  ArrowRight,
+  ArrowLeft,
+  ArrowDown,
 } from 'lucide-react';
 
 export interface UserAccount {
@@ -233,6 +237,27 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
     if (onboardingStep >= 2 && onboardingStep <= 4) {
       setActiveTab('deploy');
     }
+  }, [onboardingStep]);
+
+  // Bring the box the current tour step refers to into view.
+  const identityBoxRef = useRef<HTMLDivElement>(null);
+  const headlineBoxRef = useRef<HTMLDivElement>(null);
+  const fundBoxRef = useRef<HTMLDivElement>(null);
+  const launchButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const target =
+      onboardingStep === 2
+        ? identityBoxRef.current
+        : onboardingStep === 3
+        ? headlineBoxRef.current
+        : onboardingStep === 4
+        ? fundBoxRef.current
+        : null;
+    if (!target) return;
+    const id = window.setTimeout(() => {
+      target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'nearest' });
+    }, 60);
+    return () => window.clearTimeout(id);
   }, [onboardingStep]);
 
   useEffect(() => {
@@ -575,7 +600,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         snipeImmediatelyOnDeploy,
       });
       if (onboardingStep > 0 && onAdvanceOnboarding) {
-        onAdvanceOnboarding(5);
+        onAdvanceOnboarding(TOUR_DONE_STEP);
       }
       onClose();
     } catch (err: any) {
@@ -609,16 +634,22 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
             <h2 className="font-btn text-xl font-extrabold uppercase tracking-tight text-slate-900 dark:text-white">
               Launch Your Web App on the Billboard
             </h2>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
-              <span>
-                Next 5m snipe: ${(snapshot.billboard.nextTakeoverBlockCostCents / 100).toFixed(2)}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                ${(snapshot.billboard.currentDecayedRateCentsPerMin / 100).toFixed(3)}/min (
-                {snapshot.billboard.multipleOfBase.toFixed(1)}×)
-              </span>
-            </div>
+            {onboardingStep > 0 ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums mt-0.5">
+                Taking #1 now: ~${(snapshot.billboard.nextTakeoverBlockCostCents / 100).toFixed(2)} for 5 minutes
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
+                <span>
+                  Next 5m snipe: ${(snapshot.billboard.nextTakeoverBlockCostCents / 100).toFixed(2)}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  ${(snapshot.billboard.currentDecayedRateCentsPerMin / 100).toFixed(3)}/min (
+                  {snapshot.billboard.multipleOfBase.toFixed(1)}×)
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -664,16 +695,26 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
         </div>
 
         {/* Account Sign-In Bar (Firebase Google Auth & PayPal) */}
-        {(!userAccount || showAuthDrawer) && (
+        {/* Hidden while the tour is on name/headline steps; asked for again at funding. */}
+        {((!userAccount && onboardingStep !== 2 && onboardingStep !== 3) || showAuthDrawer) && (
           <div className="px-6 py-3.5 bg-slate-50/80 dark:bg-[#0D1118]/90 border-b border-slate-200 dark:border-slate-800/80 shrink-0">
             {!authProviderPrompt ? (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs text-slate-600 dark:text-slate-400">
-                  <span className="font-semibold text-slate-900 dark:text-slate-200">
-                    Connect your account
-                  </span>{' '}
-                  via Firebase Google Auth or PayPal for pro-rata refunds.
-                </div>
+                {onboardingStep === 4 ? (
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                    <span className="font-semibold text-slate-900 dark:text-slate-200">
+                      Sign in to fund your drone
+                    </span>{' '}
+                    so refunds for unused time come back to you. Optional for a sandbox launch.
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                    <span className="font-semibold text-slate-900 dark:text-slate-200">
+                      Sign in
+                    </span>{' '}
+                    with Google or PayPal so refunds for unused time come back to you.
+                  </div>
+                )}
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
@@ -840,72 +881,41 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
              =============================================================== */}
           {activeTab === 'deploy' && (
             <form onSubmit={handleDeploy} className="space-y-4">
-              {/* INTERACTIVE ONBOARDING TOUR BANNER FOR STEPS 2, 3, AND 4 */}
+              {/* Onboarding tour banner for steps 2-4 */}
               {onboardingStep >= 2 && onboardingStep <= 4 && (
-                <div className="rounded-xl bg-[#111318] text-white border-[2.5px] border-[#FFE66D] shadow-[4px_4px_0px_#090B0E] p-4 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#FFE66D]">
-                        Onboarding Happy Path · Step {onboardingStep} of 5
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {[2, 3, 4].map((st) => (
-                        <button
-                          key={st}
-                          type="button"
-                          onClick={() => onAdvanceOnboarding?.(st)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
-                            onboardingStep === st
-                              ? 'bg-[#FFE66D] text-[#111318]'
-                              : 'bg-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {st - 1}/3
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => onAdvanceOnboarding?.(0)}
-                        className="text-xs text-slate-400 hover:text-white ml-1 cursor-pointer"
-                      >
-                        Skip
-                      </button>
-                    </div>
-                  </div>
+                <div
+                  role="region"
+                  aria-label="Launch tour"
+                  aria-live="polite"
+                  className="sticky top-0 z-10 rounded-xl bg-[#111318] text-white border-2 border-[#FFE66D] shadow-[0_8px_24px_rgba(0,0,0,0.35)] p-4 space-y-3"
+                >
+                  <TourProgress step={onboardingStep} onSkip={() => onAdvanceOnboarding?.(0)} />
 
                   {onboardingStep === 2 && (
                     <div className="space-y-2.5">
-                      <div>
-                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
-                          Now in this Modal: Enter Your Web App Name &amp; Live URL
-                        </h3>
-                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                          Okay, now you&apos;ve opened the Studio modal! In <strong className="text-[#FFE66D]">Box 1</strong> highlighted below, write your <strong className="text-white">Web App Name</strong> (e.g. <code className="font-mono text-[#FFE66D]">PixelFlow Studio</code>) and your <strong className="text-white">Web App URL</strong> (e.g. <code className="font-mono text-[#FFE66D]">pixelflow.app</code>).
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <p className="text-[13px] text-slate-300 leading-relaxed">
+                        Enter your app&apos;s <strong className="text-white">name</strong> and{' '}
+                        <strong className="text-white">live URL</strong>. Visitors who tap the mural land there.
+                      </p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() => {
-                            if (!companyName.trim()) setCompanyName('PixelFlow Studio');
-                            if (!companyUrl.trim()) setCompanyUrl('pixelflow.app');
-                            onAdvanceOnboarding?.(3);
+                            setCompanyName('PixelFlow Studio');
+                            setCompanyUrl('pixelflow.app');
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[#FFE66D] text-xs font-semibold cursor-pointer"
+                          className="text-xs text-[#FFE66D] hover:text-white underline-offset-4 hover:underline cursor-pointer"
                         >
-                          Auto-Fill Sample Web App &amp; Next →
+                          Use a sample app
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (!companyName.trim()) setCompanyName('PixelFlow Studio');
-                            if (!companyUrl.trim()) setCompanyUrl('pixelflow.app');
-                            onAdvanceOnboarding?.(3);
-                          }}
-                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase cursor-pointer"
+                          disabled={!companyName.trim() || !companyUrl.trim()}
+                          onClick={() => onAdvanceOnboarding?.(3)}
+                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase inline-flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFE66D]"
                         >
-                          Next: Write Headline →
+                          <span>Next</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -913,79 +923,80 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
 
                   {onboardingStep === 3 && (
                     <div className="space-y-2.5">
-                      <div>
-                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
-                          Next: Write Your Web App Pitch &amp; Pick a Billboard Style
-                        </h3>
-                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                          In <strong className="text-[#FFE66D]">Box 2</strong> below, write a punchy <strong className="text-white">Billboard Headline</strong> explaining what your web app does, or tap one of the quick templates below:
-                        </p>
-                      </div>
+                      <p className="text-[13px] text-slate-300 leading-relaxed">
+                        Write the <strong className="text-white">headline</strong> painted on the wall, or start from one of these.
+                      </p>
                       <div className="flex flex-wrap gap-1.5">
                         {[
-                          'DESIGN & SHIP INTERACTIVE WEB APPS IN SECONDS',
-                          'REALTIME MULTIPLAYER CANVAS FOR PRODUCT TEAMS',
-                          'INSTANT AI WORKSPACE FOR MODERN DEVELOPERS',
+                          'DESIGN & SHIP WEB APPS IN SECONDS',
+                          'REALTIME CANVAS FOR PRODUCT TEAMS',
+                          'AI WORKSPACE FOR MODERN DEVELOPERS',
                         ].map((sampleHl) => (
                           <button
                             key={sampleHl}
                             type="button"
+                            aria-pressed={activeHeadline === sampleHl}
                             onClick={() => setActiveHeadline(sampleHl)}
-                            className={`px-2.5 py-1 rounded text-[11px] font-mono cursor-pointer transition-colors ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-btn font-bold text-left cursor-pointer transition-colors ${
                               activeHeadline === sampleHl
-                                ? 'bg-[#FFE66D] text-[#111318] font-bold'
-                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                ? 'bg-[#FFE66D] text-[#111318]'
+                                : 'bg-white/10 text-slate-200 hover:bg-white/15'
                             }`}
                           >
-                            + “{sampleHl}”
+                            {sampleHl}
                           </button>
                         ))}
                       </div>
-                      <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() => onAdvanceOnboarding?.(2)}
-                          className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                          className="text-xs text-slate-400 hover:text-white inline-flex items-center gap-1 cursor-pointer"
                         >
-                          ← Back
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>Back</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (!activeHeadline.trim()) {
-                              setActiveHeadline('DESIGN & SHIP INTERACTIVE WEB APPS IN SECONDS');
-                            }
-                            onAdvanceOnboarding?.(4);
-                          }}
-                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase cursor-pointer"
+                          disabled={!activeHeadline.trim()}
+                          onClick={() => onAdvanceOnboarding?.(4)}
+                          className="px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold text-xs uppercase inline-flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFE66D]"
                         >
-                          Next: Fund &amp; Launch →
+                          <span>Next</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
                   )}
 
                   {onboardingStep === 4 && (
-                    <div className="space-y-2">
-                      <div>
-                        <h3 className="font-btn text-sm font-extrabold uppercase tracking-tight text-white">
-                          Final Step: Pick Your Drone Strategy &amp; Tap Launch Below!
-                        </h3>
-                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                          Choose how your autonomous drone bids for your web app, pick a prepaid wallet amount (<strong className="text-[#FFE66D]">$5, $10, or $20</strong>), and click the highlighted <strong className="text-[#FFE66D]">“Fund &amp; Launch Web App onto Billboard”</strong> button at the bottom!
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="space-y-2.5">
+                      <p className="text-[13px] text-slate-300 leading-relaxed">
+                        Pick how your drone bids and a starting wallet. Then hit{' '}
+                        <strong className="text-[#FFE66D]">Fund &amp; Launch</strong> at the bottom.
+                      </p>
+                      <div className="flex items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() => onAdvanceOnboarding?.(3)}
-                          className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                          className="text-xs text-slate-400 hover:text-white inline-flex items-center gap-1 cursor-pointer"
                         >
-                          ← Back
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>Back</span>
                         </button>
-                        <span className="text-[11px] font-mono text-[#7CFF00]">
-                          ↓ Tap the orange launch button below to paint the wall!
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            launchButtonRef.current?.scrollIntoView({
+                              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+                              block: 'center',
+                            })
+                          }
+                          className="text-xs text-[#7CFF00] hover:text-white inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Jump to launch</span>
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   )}
@@ -994,11 +1005,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
 
               {/* Row 1: Web App Name & Website URL */}
               <div
-                onClick={() => {
-                  if (onboardingStep === 3 || onboardingStep === 4) {
-                    // allow user to interact freely
-                  }
-                }}
+                ref={identityBoxRef}
                 className={`rounded-xl p-3.5 transition-all ${
                   onboardingStep === 2
                     ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
@@ -1006,12 +1013,12 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    1. Web App Identity &amp; Destination Link
+                  <span className="text-sm font-btn font-bold text-slate-800 dark:text-slate-200">
+                    Your app
                   </span>
                   {onboardingStep === 2 && (
                     <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
-                      ← Start Here: Type Name &amp; URL
+                      Start here
                     </span>
                   )}
                 </div>
@@ -1051,6 +1058,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
 
               {/* Row 2: Billboard Headline + Optional Logo + Mural Style */}
               <div
+                ref={headlineBoxRef}
                 className={`rounded-xl p-3.5 space-y-3.5 transition-all ${
                   onboardingStep === 3
                     ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
@@ -1058,12 +1066,12 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    2. Billboard Headline &amp; Mural Artwork Style
+                  <span className="text-sm font-btn font-bold text-slate-800 dark:text-slate-200">
+                    Headline &amp; mural style
                   </span>
                   {onboardingStep === 3 && (
                     <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
-                      ← Write Pitch &amp; Pick Style
+                      You are here
                     </span>
                   )}
                 </div>
@@ -1194,6 +1202,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
 
               {/* Row 3: Simple Bidding Controls + Wallet Top-Up & Launch */}
               <div
+                ref={fundBoxRef}
                 className={`rounded-xl p-4 space-y-3.5 transition-all ${
                   onboardingStep === 4
                     ? 'ring-3 ring-[#FF4733] bg-amber-50/50 dark:bg-[#1A1618] border border-[#FF4733]'
@@ -1201,12 +1210,12 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    3. Autonomous Bidding Strategy &amp; Wallet Funding
+                  <span className="text-sm font-btn font-bold text-slate-800 dark:text-slate-200">
+                    Bidding &amp; wallet
                   </span>
                   {onboardingStep === 4 && (
                     <span className="text-[10px] font-mono font-bold uppercase text-[#FF4733]">
-                      ← Ready to Launch
+                      You are here
                     </span>
                   )}
                 </div>
@@ -1214,7 +1223,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Competitive Archetype
+                      Bidding style
                     </label>
                     <select
                       value={strategy.personality}
@@ -1226,17 +1235,17 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                       }
                       className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D1118] px-3 py-2 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none"
                     >
-                      <option value="sniper">Sniper (Strike dips &amp; decayed rates)</option>
-                      <option value="aggressive">Aggressive (Dominate &amp; counter-snipe)</option>
-                      <option value="patient">Patient (Low-cost opportunist)</option>
-                      <option value="peak">Peak-Hour (High-traffic challenger)</option>
+                      <option value="sniper">Sniper: jumps in when the price dips</option>
+                      <option value="aggressive">Aggressive: holds #1 and fights back</option>
+                      <option value="patient">Patient: waits for the cheapest moments</option>
+                      <option value="peak">Peak hour: goes for high-traffic times</option>
                     </select>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        Max Snipe Rate Ceiling
+                        Most you'll pay per minute
                       </label>
                       <span className="text-xs font-mono font-bold text-slate-900 dark:text-white tabular-nums">
                         ${(strategy.maxRateCentsPerMin / 100).toFixed(3)}/min (
@@ -1277,7 +1286,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                       }
                       className="accent-[#FF4733] rounded"
                     />
-                    <span>Auto-retaliate when sniped off #1</span>
+                    <span>Take #1 back if someone outbids me</span>
                   </label>
 
                   <label className="inline-flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
@@ -1287,7 +1296,7 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                       onChange={(e) => setSnipeImmediatelyOnDeploy(e.target.checked)}
                       className="accent-[#FF4733] rounded"
                     />
-                    <span>Snipe #1 spot immediately on launch</span>
+                    <span>Grab #1 as soon as I launch</span>
                   </label>
                 </div>
 
@@ -1347,10 +1356,10 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200/80 dark:border-slate-800">
                   <div>
                     <span className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Prepaid Wallet Funding
+                      Starting wallet
                     </span>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Unused time is refunded pro-rata automatically
+                      Time you don&apos;t use is refunded automatically
                     </span>
                   </div>
 
@@ -1380,11 +1389,12 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
               )}
 
               <button
+                ref={launchButtonRef}
                 type="submit"
                 disabled={isDeploying || moderationStatus === 'flagged'}
                 className={`street-ui-btn w-full py-3 px-4 rounded-xl bg-[#FF4733] hover:bg-[#E83A27] text-white font-btn font-extrabold uppercase text-sm inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
                   onboardingStep === 4
-                    ? 'ring-4 ring-[#FFE66D] shadow-[0_0_28px_rgba(255,230,109,0.9)]'
+                    ? 'ring-4 ring-[#FFE66D]'
                     : ''
                 }`}
               >
@@ -1421,17 +1431,17 @@ export const BackwallControlPage: React.FC<BackwallControlPageProps> = ({
                 {snapshot.agents.length === 0 ? (
                   <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-6 text-center space-y-2">
                     <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      No autonomous agents deployed yet
+                      Your drones will show up here
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Launch an agent to bid automatically and receive instant pro-rata refunds when kicked off.
+                      A drone bids for the #1 spot for you and refunds unused time if it gets outbid.
                     </p>
                     <button
                       type="button"
                       onClick={() => setActiveTab('deploy')}
                       className="mt-2 px-4 py-2 rounded-lg bg-[#FF4733] text-white text-xs font-semibold cursor-pointer"
                     >
-                      Deploy First Agent
+                      Launch your first drone
                     </button>
                   </div>
                 ) : (

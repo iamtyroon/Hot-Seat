@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 
 import { UserAccount } from './BackwallControlPage';
+import { TourProgress, TOUR_DONE_STEP, TOUR_TOTAL } from './OnboardingTour';
 
 export type PageRoute = 'wall' | 'war-room' | 'studio' | 'ledger' | 'embed';
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -1898,10 +1899,14 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
                       ? 'bg-[#FF4733] text-white'
                       : 'bg-[#FFE66D] text-[#111318] hover:bg-[#fff099]'
                   }`}
-                  title="Start the guided onboarding tour for launching your web app on the billboard"
+                  title={onboardingStep > 0 ? 'Restart the launch tour' : 'Show me how to launch a web app'}
                 >
                   <Sparkles className="w-3 h-3" />
-                  <span>{onboardingStep > 0 ? `Tour: Step ${onboardingStep}/5` : 'Tour Guide'}</span>
+                  <span className="tabular-nums">
+                    {onboardingStep > 0
+                      ? `Tour ${Math.min(onboardingStep, TOUR_TOTAL)}/${TOUR_TOTAL}`
+                      : 'Tour'}
+                  </span>
                 </button>
               )}
 
@@ -2357,99 +2362,87 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
             Step 5: Celebrates their live Web App on the billboard & explains what's next
            ================================================================= */}
         {!isEmbedMode && onboardingStep === 1 && (
-          <div className="absolute bottom-24 right-4 sm:right-44 z-50 max-w-[380px] w-[92%] pointer-events-auto">
-            <div className="bg-[#111318] text-white border-[3px] border-[#FFE66D] shadow-[6px_6px_0px_#090B0E] rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#FFE66D]">
-                  Onboarding Tour · Step 1 of 5
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onAdvanceOnboarding?.(0)}
-                  className="text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  Skip Tour
-                </button>
-              </div>
+          <div
+            role="dialog"
+            aria-labelledby="tour-step-1-title"
+            className="absolute bottom-24 right-3 sm:right-44 z-50 w-[min(360px,calc(100%-1.5rem))] pointer-events-auto"
+          >
+            <div className="bg-[#111318] text-white border-2 border-[#FFE66D] shadow-[0_12px_32px_rgba(0,0,0,0.45)] rounded-xl p-4 space-y-3">
+              <TourProgress step={1} onSkip={() => onAdvanceOnboarding?.(0)} />
 
-              <div className="space-y-1.5">
-                <h3 className="font-btn text-base font-extrabold uppercase tracking-tight text-white">
-                  1. Where to Go First: Open the Web App Studio
+              <div className="space-y-1">
+                <h3 id="tour-step-1-title" className="font-btn text-base font-extrabold text-white text-balance">
+                  Put your web app on the #1 spot
                 </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  You just logged into the live global billboard! To create and launch your{' '}
-                  <strong className="text-[#FFE66D]">Web App</strong> onto the #1 spot, tap the{' '}
-                  <strong className="text-white">Launch Web App Booth</strong> on the right sidewalk
-                  or the <strong className="text-white">+ Launch Web App</strong> button on the curb below.
+                <p className="text-[13px] text-slate-300 leading-relaxed">
+                  Name it, write a headline, fund a drone. About a minute. Start at the{' '}
+                  <strong className="text-white">vendor booth</strong> or{' '}
+                  <strong className="text-white">Launch Web App</strong> on the curb.
                 </p>
               </div>
 
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <span className="text-[11px] text-[#95D5B2] font-medium">
-                  Next: Fill in your web app details
-                </span>
+              <div className="flex items-center justify-between gap-3 pt-0.5">
                 <button
                   type="button"
+                  onClick={() => onAdvanceOnboarding?.(0)}
+                  className="text-xs text-slate-400 hover:text-white underline-offset-4 hover:underline cursor-pointer"
+                >
+                  I&apos;ll explore first
+                </button>
+                <button
+                  type="button"
+                  autoFocus
                   onClick={() => {
                     onNavigateBrick('studio');
                     onAdvanceOnboarding?.(2);
                   }}
-                  className="street-ui-btn px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#ff5947] text-white font-btn font-extrabold text-xs uppercase cursor-pointer whitespace-nowrap"
+                  className="street-ui-btn px-3.5 py-1.5 rounded-lg bg-[#FF4733] hover:bg-[#ff5947] text-white font-btn font-extrabold text-xs uppercase cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFE66D]"
                 >
-                  Tap to Open Studio →
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Open studio</span>
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {!isEmbedMode && onboardingStep === 5 && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 max-w-[440px] w-[92%] pointer-events-auto">
-            <div className="bg-[#111318] text-white border-[3px] border-[#7CFF00] shadow-[6px_6px_0px_#090B0E] rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#7CFF00]">
-                  Onboarding Complete · Step 5 of 5
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onAdvanceOnboarding?.(0)}
-                  className="text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
+        {!isEmbedMode && onboardingStep === TOUR_DONE_STEP && (
+          <div
+            role="dialog"
+            aria-labelledby="tour-done-title"
+            className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 w-[min(400px,calc(100%-1.5rem))] pointer-events-auto"
+          >
+            <div className="bg-[#111318] text-white border-2 border-[#7CFF00] shadow-[0_12px_32px_rgba(0,0,0,0.45)] rounded-xl p-4 space-y-3">
+              <TourProgress step={TOUR_DONE_STEP} onSkip={() => onAdvanceOnboarding?.(0)} skipLabel="Close" />
 
-              <div className="space-y-1.5">
-                <h3 className="font-btn text-base font-extrabold uppercase tracking-tight text-white">
-                  Your Web App is Live on the #1 Billboard!
+              <div className="space-y-1">
+                <h3 id="tour-done-title" className="font-btn text-base font-extrabold text-white text-balance">
+                  <span className="text-[#FFE66D]">{topLayer?.companyName || 'Your web app'}</span> is on the wall
                 </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Your autonomous paint drone just sprayed{' '}
-                  <strong className="text-[#FFE66D]">
-                    {topLayer?.companyName || 'your web app'}
-                  </strong>{' '}
-                  onto the brick wall. Here is what you can do next:
+                <p className="text-[13px] text-slate-300 leading-relaxed">
+                  Your drone now defends the spot on its own and refunds unused time if it gets sniped.
                 </p>
-                <ul className="text-xs text-slate-300 space-y-1 pt-0.5">
-                  <li>
-                    • <strong className="text-white">Click the Billboard</strong>: Visitors click the mural to open your web app URL directly.
-                  </li>
-                  <li>
-                    • <strong className="text-white">Restyle Live on the Curb</strong>: Tap any <strong className="text-[#FFE66D]">Style</strong> button or <strong className="text-[#FFE66D]">Upload Logo</strong> below to change how your web app looks on the bricks.
-                  </li>
-                  <li>
-                    • <strong className="text-white">Auto-Defense &amp; Refunds</strong>: Your AI drone defends #1 and collects automatic pro-rata refunds if sniped.
-                  </li>
-                </ul>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-1">
+              <ul className="text-[13px] text-slate-300 space-y-1.5">
+                <li className="flex gap-2">
+                  <Crosshair className="w-4 h-4 mt-0.5 shrink-0 text-[#7CFF00]" />
+                  <span>Visitors click the mural to open your URL.</span>
+                </li>
+                <li className="flex gap-2">
+                  <SprayCan className="w-4 h-4 mt-0.5 shrink-0 text-[#7CFF00]" />
+                  <span>Restyle anytime from the curb: pick a style or upload a logo.</span>
+                </li>
+              </ul>
+
+              <div className="flex justify-end pt-0.5">
                 <button
                   type="button"
+                  autoFocus
                   onClick={() => onAdvanceOnboarding?.(0)}
-                  className="street-ui-btn px-4 py-1.5 rounded-lg bg-[#7CFF00] hover:bg-[#8fff26] text-[#111318] font-btn font-extrabold text-xs uppercase cursor-pointer"
+                  className="street-ui-btn px-4 py-1.5 rounded-lg bg-[#7CFF00] hover:bg-[#8fff26] text-[#111318] font-btn font-extrabold text-xs uppercase cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 >
-                  Finish Tour ✓
+                  Done
                 </button>
               </div>
             </div>
@@ -2493,7 +2486,11 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
           <div className="max-w-[1440px] mx-auto flex flex-col gap-2">
             {/* ROW 1: COMPACT DRONE AGENT SWITCHER + RIVAL BLITZ & NEW AGENT */}
             <div className="flex flex-wrap items-center justify-between gap-2 pb-0.5">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div
+                className={`flex items-center gap-2 flex-wrap transition-opacity duration-300 ${
+                  onboardingStep === 1 ? 'opacity-35 hover:opacity-100 focus-within:opacity-100' : ''
+                }`}
+              >
                 <span className="text-[11px] font-btn font-extrabold uppercase text-[#94A3B8] inline-flex items-center gap-1.5">
                   <Swords className="w-3.5 h-3.5 text-[#FF4733]" />
                   <span>Active Drone Crew:</span>
@@ -2542,7 +2539,11 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
                   disabled={busyAction !== null}
                   onClick={() => handleAction('blitz', handleRivalBlitzWave)}
                   title="Trigger a multi-agent Rival Blitz so competing drones snipe the #1 spot back and forth!"
-                  className="street-ui-btn px-2.5 py-1 rounded-xs bg-[#FFE66D] hover:bg-[#fff099] text-[#111318] font-btn font-bold text-xs uppercase inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  className={`street-ui-btn px-2.5 py-1 rounded-xs font-btn font-bold text-xs uppercase inline-flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                    onboardingStep === 1
+                      ? 'bg-[#262B33] hover:bg-[#323944] text-[#94A3B8]'
+                      : 'bg-[#FFE66D] hover:bg-[#fff099] text-[#111318]'
+                  }`}
                 >
                   <Flame className="w-3.5 h-3.5 text-[#FF4733] fill-current" />
                   <span>Rival Drone Blitz</span>
@@ -2558,7 +2559,7 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
                   }}
                   className={`street-ui-btn px-3 py-1 rounded-xs font-btn font-bold text-xs uppercase inline-flex items-center gap-1 cursor-pointer ${
                     onboardingStep === 1
-                      ? 'bg-[#FF4733] text-white ring-3 ring-[#FFE66D] shadow-[0_0_20px_rgba(255,230,109,0.9)] animate-pulse'
+                      ? 'bg-[#FF4733] text-white ring-3 ring-[#FFE66D] motion-safe:animate-pulse'
                       : 'bg-[#262B33] hover:bg-[#323944] text-white'
                   }`}
                 >

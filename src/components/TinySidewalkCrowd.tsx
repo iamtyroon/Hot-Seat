@@ -218,13 +218,13 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
           }}
           className={`group absolute pointer-events-auto cursor-pointer focus:outline-none transition-transform duration-200 hover:-translate-y-1.5 hover:scale-[1.04] ${
             highlightVendorForTour
-              ? 'ring-4 ring-[#FFE66D] rounded-xl p-1 bg-[#FFE66D]/15 shadow-[0_0_36px_rgba(255,230,109,0.9)]'
+              ? 'ring-4 ring-[#FFE66D] rounded-xl p-1 bg-[#FFE66D]/15'
               : ''
           }`}
         >
           {highlightVendorForTour && (
-            <div className="mb-1.5 px-2.5 py-1 bg-[#FF4733] text-white border-2 border-[#111318] shadow-[3px_3px_0px_#111318] rounded-xs font-btn text-[11px] font-extrabold uppercase tracking-wide flex items-center justify-center gap-1 whitespace-nowrap animate-bounce">
-              <span>STEP 1 · TAP BOOTH TO START ↓</span>
+            <div className="mb-1.5 px-2.5 py-1 bg-[#FF4733] text-white border-2 border-[#111318] shadow-[3px_3px_0px_#111318] rounded-xs font-btn text-[11px] font-extrabold uppercase flex items-center justify-center gap-1 whitespace-nowrap motion-safe:animate-bounce">
+              <span>Start here</span>
             </div>
           )}
 

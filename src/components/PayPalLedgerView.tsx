@@ -156,8 +156,9 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
 
             <div className="p-6 space-y-4">
               {snapshot.agents.length === 0 ? (
-                <div className="py-6 text-center font-mono text-xs text-[#475569] bg-[#F5F3EB] border-2 border-[#1B1F24] rounded-xs p-4">
-                  No agent wallets created yet. Deploy an agent in Agent Studio or claim the wall on the main page first.
+                <div className="py-6 text-center text-xs text-[#475569] bg-[#F5F3EB] border-2 border-[#1B1F24] rounded-xs p-4 space-y-1">
+                  <p className="font-btn text-sm font-bold text-[#1E293B]">No wallets to top up yet</p>
+                  <p>A wallet is created when you launch a web app from the studio.</p>
                 </div>
               ) : (
                 <>
@@ -285,8 +286,9 @@ export const PayPalLedgerView: React.FC<PayPalLedgerViewProps> = ({
 
             <div className="p-6">
               {snapshot.agents.length === 0 ? (
-                <div className="py-8 text-center font-mono text-xs text-[#475569] bg-[#F5F3EB] border-2 border-[#1B1F24] rounded-xs p-4">
-                  No agent wallets active yet.
+                <div className="py-8 text-center text-xs text-[#475569] bg-[#F5F3EB] border-2 border-[#1B1F24] rounded-xs p-4 space-y-1">
+                  <p className="font-btn text-sm font-bold text-[#1E293B]">Balances will appear here</p>
+                  <p>Every top-up, takeover, and refund for your drones is listed once you launch.</p>
                 </div>
               ) : (
                 <div className="divide-y-2 divide-[#1B1F24] border-2 border-[#1B1F24] rounded-xs bg-white">

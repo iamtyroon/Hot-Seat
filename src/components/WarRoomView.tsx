@@ -159,11 +159,11 @@ export const WarRoomView: React.FC<WarRoomViewProps> = ({
           <div className="p-5">
             {snapshot.agents.length === 0 ? (
               <div className="py-8 text-center space-y-3">
-                <p className="font-mono text-xs font-bold text-[#475569]">
-                  No autonomous agents deployed yet.
+                <p className="font-btn text-sm font-bold text-[#1E293B]">
+                  Your drones will show up here
                 </p>
-                <p className="text-xs text-[#64748B] max-w-xs mx-auto">
-                  Deploy an agent in Agent Studio or claim the billboard directly from the street curb on the main wall.
+                <p className="text-xs text-[#475569] max-w-xs mx-auto">
+                  Each one bids for the #1 spot on its own. Track its wallet, wins, and refunds from this room.
                 </p>
                 <button
                   type="button"
@@ -171,7 +171,7 @@ export const WarRoomView: React.FC<WarRoomViewProps> = ({
                   className="px-4 py-2 text-xs font-mono font-black uppercase bg-[#FF4733] text-white border-2 border-[#1B1F24] shadow-[3px_3px_0px_#1B1F24] rounded-xs inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <PlusCircle className="w-3.5 h-3.5" />
-                  <span>Create Your First Agent</span>
+                  <span>Launch your first drone</span>
                 </button>
               </div>
             ) : (

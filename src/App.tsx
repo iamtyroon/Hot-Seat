@@ -12,6 +12,13 @@ import {
   syncFirebaseUserToFirestore,
   signOutFirebaseUser,
 } from './firebase';
+import {
+  readTourDone,
+  markTourDone,
+  claimOneTimeTip,
+  readMyAgentIds,
+  rememberMyAgentId,
+} from './components/OnboardingTour';
 
 const ACCOUNT_STORAGE_KEY = 'hotseat_user_account_v1';
 
@@ -21,10 +28,14 @@ export function App() {
   const [selectedManualAgentId, setSelectedManualAgentId] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [onboardingStep, setOnboardingStep] = useState<number>(1);
+  // Auto-start the tour only for first-time visitors; skip/finish is remembered.
+  const [onboardingStep, setOnboardingStep] = useState<number>(() => (readTourDone() ? 0 : 1));
   const prevTakeoverCountRef = useRef<number | null>(null);
+  const prevKickedAgentIdRef = useRef<string | null>(null);
+  const myAgentIdsRef = useRef<string[]>(readMyAgentIds());
 
   const handleAdvanceOnboarding = (nextStep: number) => {
+    if (nextStep === 0) markTourDone();
     setOnboardingStep(nextStep);
   };
 
@@ -175,11 +186,11 @@ export function App() {
     }
   };
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, durationMs = 3600) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage((curr) => (curr === msg ? null : curr));
-    }, 3600);
+    }, durationMs);
   };
 
   useEffect(() => {
@@ -190,6 +201,7 @@ export function App() {
       .then((data: ArenaSnapshot) => {
         setSnapshot(data);
         prevTakeoverCountRef.current = data.billboard.totalTakeoversCount;
+        prevKickedAgentIdRef.current = data.billboard.lastKickedAgentId;
       })
       .catch(() => {});
 
@@ -204,6 +216,23 @@ export function App() {
           playSpraySound();
         }
         prevTakeoverCountRef.current = data.billboard.totalTakeoversCount;
+
+        // First time one of this browser's drones is knocked off #1, explain what happens next.
+        const kickedId = data.billboard.lastKickedAgentId;
+        if (
+          kickedId &&
+          kickedId !== prevKickedAgentIdRef.current &&
+          myAgentIdsRef.current.includes(kickedId) &&
+          claimOneTimeTip('first_outbid')
+        ) {
+          const kickedName =
+            data.agents.find((a) => a.id === kickedId)?.companyName || 'Your app';
+          showToast(
+            `${kickedName} was outbid. Unused time is refunded to its wallet, and the drone will try to take #1 back.`,
+            8000
+          );
+        }
+        prevKickedAgentIdRef.current = kickedId;
         setSnapshot(data);
       } catch {
         // Ignore parse error
@@ -325,6 +354,7 @@ export function App() {
     if (!res.ok) throw new Error(data.error || 'Failed to deploy agent');
     if (data.snapshot) setSnapshot(data.snapshot);
     setSelectedManualAgentId(data.agentId);
+    if (data.agentId) myAgentIdsRef.current = rememberMyAgentId(data.agentId);
     showToast(
       `Launched ${payload.companyName.toUpperCase()} onto the billboard (${data.order.orderId})!`
     );
@@ -446,6 +476,9 @@ export function App() {
         onManualTakeover={handleManualTakeover}
         onUpdateHolderLogo={async (agentId, logoDataUrl, templateId) => {
           await handleUpdateAgent(agentId, { logoDataUrl, templateId });
+          if (claimOneTimeTip('first_restyle')) {
+            showToast('Restyled live. Everyone watching the wall sees the new look right away.', 6000);
+          }
         }}
         onTriggerBiddingWar={handleTriggerBiddingWar}
         onFastForwardCooling={handleFastForwardCooling}
