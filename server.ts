@@ -920,7 +920,7 @@ function getArenaSnapshot(): any {
     }));
 
   const hasLivePayPalCredentials = Boolean(
-    runtimePayPalConfig.clientId && runtimePayPalConfig.clientSecret
+    runtimePayPalConfig.clientId && runtimePayPalConfig.clientSecret && payPalTokenVerified
   );
 
   return {
@@ -1143,6 +1143,7 @@ const runtimePayPalConfig = {
   webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
   mcpEndpoint: process.env.PAYPAL_MCP_ENDPOINT || 'https://mcp.paypal.com/http',
 };
+let payPalTokenVerified = false;
 
 function getPayPalEnvironment(): 'LIVE' | 'SANDBOX' {
   return runtimePayPalConfig.sandboxEnabled ? 'SANDBOX' : 'LIVE';
@@ -1187,6 +1188,7 @@ async function buildPayPalStatusResponse() {
     const token = await getPayPalAccessToken();
     tokenVerified = Boolean(token);
   }
+  payPalTokenVerified = tokenVerified;
   const modeLabel = runtimePayPalConfig.sandboxEnabled
     ? configured
       ? 'SANDBOX API CONNECTED'
