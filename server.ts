@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import Database from 'better-sqlite3';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
@@ -9,7 +8,7 @@ import crypto from 'crypto';
 dotenv.config();
 process.env.DISABLE_HMR = 'true';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const BASE_RATE_CENTS_PER_MIN = 4.0; // 20 cents for 5 minutes
 const MAX_RATE_CENTS_PER_MIN = 40.0; // 10x base cap ($2.00 for 5 minutes)
 const BLOCK_DURATION_MINUTES = 5;
@@ -1126,7 +1125,7 @@ function runDeterministicArenaTick() {
   broadcastSnapshot();
 }
 
-setInterval(runDeterministicArenaTick, 3500);
+if (process.env.VERCEL !== '1') setInterval(runDeterministicArenaTick, 3500);
 
 const ADMIN_EMAIL = 'imtyroon@gmail.com';
 
@@ -2266,6 +2265,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
   });
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -2346,9 +2346,15 @@ export class ErrorOverlay {}
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Hot Seat server running on http://0.0.0.0:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+export const serverApp = startServer();
+
+if (process.env.VERCEL !== '1') {
+  serverApp.then((app) => {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Hot Seat server running on http://0.0.0.0:${PORT}`);
+    });
+  });
+}
