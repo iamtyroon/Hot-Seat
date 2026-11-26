@@ -1,16 +1,19 @@
 import express from 'express';
-import Database from 'better-sqlite3';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
+import { db, hasDurableStorage, initializeStorage } from './src/server/storage';
+import { quoteFiveMinuteLeaseCents } from './src/gameAds/domain';
+import { createGameAdsRouter, getAudiencePricingTiers, getLiveAudience, samplePublisherLeaseHours } from './src/gameAds/routes';
+import { publisherPayoutWebhookStatus } from './src/server/publisherPayouts';
 
 dotenv.config();
 process.env.DISABLE_HMR = 'true';
 
 const PORT = Number(process.env.PORT) || 3000;
-const BASE_RATE_CENTS_PER_MIN = 4.0; // 20 cents for 5 minutes
-const MAX_RATE_CENTS_PER_MIN = 40.0; // 10x base cap ($2.00 for 5 minutes)
+const BASE_RATE_CENTS_PER_MIN = 20.0; // $1.00 for 5 minutes
+const MAX_RATE_CENTS_PER_MIN = Number.POSITIVE_INFINITY;
 const BLOCK_DURATION_MINUTES = 5;
 const BLOCK_DURATION_MS = BLOCK_DURATION_MINUTES * 60 * 1000;
 const HALF_LIFE_MS = 10 * 60 * 1000; // 10 minutes half-life decay
@@ -23,11 +26,6 @@ const VALID_TEMPLATES = [
   'SKATE_DECK',
   'NEON_ARCADE',
 ];
-
-// Initialize SQLite with WAL mode for fast serialized atomic transactions
-const db = new Database(':memory:');
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
 
 function getGenAIClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -44,8 +42,8 @@ function getGenAIClient(): GoogleGenAI | null {
   });
 }
 
-// Setup tables
-db.exec(`
+// Local development schema; production uses the idempotent Neon migration.
+const SQLITE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS billboard_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     current_holder_agent_id TEXT,
@@ -56,12 +54,12 @@ db.exec(`
     current_spray_color TEXT,
     current_text_color TEXT,
     current_template_id TEXT DEFAULT 'BOMB_BURST',
-    rate_paid_cents_per_min REAL NOT NULL DEFAULT 4.0,
-    block_cost_cents INTEGER NOT NULL DEFAULT 20,
+    rate_paid_cents_per_min REAL NOT NULL DEFAULT 20.0,
+    block_cost_cents INTEGER NOT NULL DEFAULT 100,
     started_at_ms INTEGER NOT NULL DEFAULT 0,
     expires_at_ms INTEGER NOT NULL DEFAULT 0,
     last_takeover_at_ms INTEGER NOT NULL DEFAULT 0,
-    last_takeover_rate_cents_per_min REAL NOT NULL DEFAULT 4.0,
+    last_takeover_rate_cents_per_min REAL NOT NULL DEFAULT 20.0,
     cooling_offset_ms INTEGER NOT NULL DEFAULT 0,
     is_kill_switch_active INTEGER NOT NULL DEFAULT 0,
     total_takeovers_count INTEGER NOT NULL DEFAULT 0,
@@ -156,6 +154,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS paypal_orders (
     order_id TEXT PRIMARY KEY,
+    paypal_capture_id TEXT UNIQUE,
     agent_id TEXT NOT NULL,
     company_name TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
@@ -165,7 +164,10 @@ db.exec(`
     approve_url TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
   );
-`);
+`;
+
+await initializeStorage(SQLITE_SCHEMA);
+await seedInitialArena();
 
 // Vibrant Cartoon Street-Art Palettes
 const SPRAY_THEMES = [
@@ -201,7 +203,7 @@ function computePriceMetrics(row: any, nowMs: number) {
   }
 
   const nextTakeoverBlockCostCents = Math.max(
-    20,
+    100,
     Math.round(nextTakeoverRate * BLOCK_DURATION_MINUTES)
   );
   const multipleOfBase = Number((currentDecayedRate / BASE_RATE_CENTS_PER_MIN).toFixed(2));
@@ -215,7 +217,7 @@ function computePriceMetrics(row: any, nowMs: number) {
   };
 }
 
-function insertBattleLog(
+async function insertBattleLog(
   agentId: string | null,
   companyName: string,
   category: string,
@@ -223,7 +225,7 @@ function insertBattleLog(
   rateCentsPerMin: number,
   nowMs: number = Date.now()
 ) {
-  db.prepare(
+  await db.prepare(
     `INSERT INTO battle_logs (id, agent_id, company_name, category, message, rate_cents_per_min, created_at_ms)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -236,35 +238,127 @@ function insertBattleLog(
     nowMs
   );
 
-  db.prepare(
+  await db.prepare(
     `DELETE FROM battle_logs WHERE id NOT IN (
        SELECT id FROM battle_logs ORDER BY created_at_ms DESC LIMIT 120
      )`
   ).run();
 }
 
-function recordPricePoint(
+async function recordPricePoint(
   nowMs: number,
   rateCentsPerMin: number,
   takeoverRateCentsPerMin: number,
   eventLabel?: string,
   companyName?: string
 ) {
-  db.prepare(
+  await db.prepare(
     `INSERT INTO price_history (timestamp_ms, rate_cents_per_min, takeover_rate_cents_per_min, event_label, company_name)
      VALUES (?, ?, ?, ?, ?)`
   ).run(nowMs, rateCentsPerMin, takeoverRateCentsPerMin, eventLabel || null, companyName || null);
 
-  db.prepare(
+  await db.prepare(
     `DELETE FROM price_history WHERE id NOT IN (
        SELECT id FROM price_history ORDER BY id DESC LIMIT 90
      )`
   ).run();
 }
 
+async function consumeVerifiedWalletFunds(agentId: string, amountCents: number) {
+  const lockClause = hasDurableStorage ? ' FOR UPDATE' : '';
+  const lots = await db.prepare(`SELECT id, available_cents FROM wallet_funding_lots
+    WHERE agent_id = ? AND available_cents > 0 ORDER BY collected_at_ms, id${lockClause}`).all(agentId) as Array<{ id: string; available_cents: number }>;
+  let remaining = amountCents;
+  const allocations: Array<{ fundingId: string; amountCents: number }> = [];
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    const amount = Math.min(remaining, Number(lot.available_cents));
+    const updated = await db.prepare('UPDATE wallet_funding_lots SET available_cents = available_cents - ? WHERE id = ? AND available_cents >= ?')
+      .run(amount, lot.id, amount) as { changes?: number };
+    if (updated.changes !== 1) throw new Error('Verified wallet funding changed during takeover.');
+    allocations.push({ fundingId: lot.id, amountCents: amount });
+    remaining -= amount;
+  }
+  return { collectedCents: amountCents - remaining, allocations };
+}
+
+async function restoreLeaseFunding(leaseId: string, requestedRefundCents: number) {
+  const lockClause = hasDurableStorage ? ' FOR UPDATE OF a, f' : '';
+  const allocations = await db.prepare(`SELECT a.funding_id, a.amount_cents, a.refunded_cents, a.chargeback_cents
+    FROM game_ad_lease_funding a JOIN wallet_funding_lots f ON f.id = a.funding_id
+    WHERE a.lease_id = ? ORDER BY f.collected_at_ms, f.id${lockClause}`).all(leaseId) as Array<{
+    funding_id: string; amount_cents: number; refunded_cents: number; chargeback_cents: number;
+  }>;
+  let remaining = requestedRefundCents;
+  let restored = 0;
+  for (const allocation of allocations) {
+    if (remaining <= 0) break;
+    const availableToRefund = Math.max(0, Number(allocation.amount_cents) - Number(allocation.refunded_cents) - Number(allocation.chargeback_cents));
+    const amount = Math.min(remaining, availableToRefund);
+    if (!amount) continue;
+    await db.prepare('UPDATE game_ad_lease_funding SET refunded_cents = refunded_cents + ? WHERE lease_id = ? AND funding_id = ?')
+      .run(amount, leaseId, allocation.funding_id);
+    await db.prepare('UPDATE wallet_funding_lots SET available_cents = available_cents + ? WHERE id = ?')
+      .run(amount, allocation.funding_id);
+    remaining -= amount;
+    restored += amount;
+  }
+  return restored;
+}
+
+async function applyPayPalReversal(orderId: string, requestedCents: number, kind: 'refunded' | 'chargeback') {
+  const lockClause = hasDurableStorage ? ' FOR UPDATE' : '';
+  const lot = await db.prepare(`SELECT f.*, o.agent_id, o.company_name FROM wallet_funding_lots f
+    JOIN paypal_orders o ON o.order_id = f.order_id WHERE f.order_id = ?${lockClause}`).get(orderId) as any;
+  if (!lot) return 0;
+  const alreadyReversed = Number(lot.refunded_cents) + Number(lot.chargeback_cents);
+  let remaining = Math.min(Math.max(0, Number(requestedCents)), Math.max(0, Number(lot.funded_cents) - alreadyReversed));
+  let applied = 0;
+  const fromAvailable = Math.min(remaining, Number(lot.available_cents));
+  if (fromAvailable > 0) {
+    await db.prepare(`UPDATE wallet_funding_lots SET available_cents = available_cents - ?, ${kind}_cents = ${kind}_cents + ? WHERE id = ?`)
+      .run(fromAvailable, fromAvailable, lot.id);
+    remaining -= fromAvailable;
+    applied += fromAvailable;
+  }
+  const allocations = await db.prepare(`SELECT a.lease_id, a.amount_cents, a.refunded_cents, a.chargeback_cents
+    FROM game_ad_lease_funding a JOIN game_ad_leases l ON l.id = a.lease_id
+    WHERE a.funding_id = ? ORDER BY l.started_at_ms DESC${hasDurableStorage ? ' FOR UPDATE OF a, l' : ''}`).all(lot.id) as Array<{
+    lease_id: string; amount_cents: number; refunded_cents: number; chargeback_cents: number;
+  }>;
+  for (const allocation of allocations) {
+    if (remaining <= 0) break;
+    const stillSpent = Math.max(0, Number(allocation.amount_cents) - Number(allocation.refunded_cents) - Number(allocation.chargeback_cents));
+    const amount = Math.min(remaining, stillSpent);
+    if (!amount) continue;
+    await db.prepare(`UPDATE game_ad_lease_funding SET ${kind}_cents = ${kind}_cents + ? WHERE lease_id = ? AND funding_id = ?`)
+      .run(amount, allocation.lease_id, lot.id);
+    await db.prepare(`UPDATE game_ad_leases SET ${kind}_cents = ${kind}_cents + ? WHERE id = ?`)
+      .run(amount, allocation.lease_id);
+    remaining -= amount;
+    applied += amount;
+  }
+  if (applied > 0) {
+    await db.prepare(`UPDATE wallet_funding_lots SET ${kind}_cents = ${kind}_cents + ? WHERE id = ?`).run(applied - fromAvailable, lot.id);
+    const agent = await db.prepare('SELECT balance_cents FROM agents WHERE id = ?').get(lot.agent_id) as { balance_cents: number } | undefined;
+    if (agent) {
+      const balance = Number(agent.balance_cents) - applied;
+      await db.prepare('UPDATE agents SET balance_cents = ? WHERE id = ?').run(balance, lot.agent_id);
+      await db.prepare(`INSERT INTO ledger_entries
+        (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'paypal_webhook', ?, ?)
+        ON CONFLICT (idempotency_key) DO NOTHING`).run(
+        crypto.randomUUID(), `paypal-reversal:${orderId}:${kind}:${lot[kind === 'refunded' ? 'refunded_cents' : 'chargeback_cents'] + applied}`,
+        lot.agent_id, lot.company_name, kind === 'refunded' ? 'PAYPAL_REFUND' : 'PAYPAL_CHARGEBACK', -applied, balance,
+        orderId, `PayPal ${kind} applied to verified wallet funding.`, Date.now());
+    }
+  }
+  return applied;
+}
+
 // Single-Writer Atomic Takeover Transaction
 const executeAtomicTakeover = db.transaction(
-  (params: {
+  async (params: {
     buyerAgentId: string;
     idempotencyKey: string;
     headlineOverride?: string;
@@ -286,7 +380,7 @@ const executeAtomicTakeover = db.transaction(
     } = params;
 
     // 1. Idempotency check
-    const existingEntry = db
+    const existingEntry = await db
       .prepare('SELECT id FROM ledger_entries WHERE idempotency_key = ?')
       .get(idempotencyKey) as any;
     if (existingEntry) {
@@ -294,8 +388,14 @@ const executeAtomicTakeover = db.transaction(
     }
 
     // 2. Load current billboard & buyer agent
-    const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
-    const buyer = db.prepare('SELECT * FROM agents WHERE id = ?').get(buyerAgentId) as any;
+    const boardSql = hasDurableStorage
+      ? 'SELECT * FROM billboard_state WHERE id = 1 FOR UPDATE'
+      : 'SELECT * FROM billboard_state WHERE id = 1';
+    const buyerSql = hasDurableStorage
+      ? 'SELECT * FROM agents WHERE id = ? FOR UPDATE'
+      : 'SELECT * FROM agents WHERE id = ?';
+    const board = (await db.prepare(boardSql).get()) as any;
+    const buyer = (await db.prepare(buyerSql).get(buyerAgentId)) as any;
 
     if (!buyer) {
       throw new Error('Agent not found.');
@@ -305,6 +405,12 @@ const executeAtomicTakeover = db.transaction(
     }
 
     const metrics = computePriceMetrics(board, nowMs);
+    const displacedLeaseSql = hasDurableStorage
+      ? 'SELECT * FROM game_ad_leases WHERE agent_id = ? AND expires_at_ms > ? ORDER BY started_at_ms DESC LIMIT 1 FOR UPDATE'
+      : 'SELECT * FROM game_ad_leases WHERE agent_id = ? AND expires_at_ms > ? ORDER BY started_at_ms DESC LIMIT 1';
+    const displacedLease = metrics.hasActiveHolder && board.current_holder_agent_id
+      ? await db.prepare(displacedLeaseSql).get(board.current_holder_agent_id, nowMs) as any
+      : null;
 
     // 3. Block self-kicks while holding active lease during autonomous background ticks
     if (
@@ -315,8 +421,14 @@ const executeAtomicTakeover = db.transaction(
       throw new Error('Self-kick blocked: this agent already holds the billboard.');
     }
 
-    const takeoverRate = metrics.nextTakeoverRateCentsPerMin;
-    const blockCostCents = metrics.nextTakeoverBlockCostCents;
+    const audience = await getLiveAudience(nowMs);
+    const pricingTiers = await getAudiencePricingTiers();
+    const blockCostCents = quoteFiveMinuteLeaseCents(
+      metrics.nextTakeoverBlockCostCents,
+      audience.combinedAudience,
+      pricingTiers
+    );
+    const takeoverRate = blockCostCents / BLOCK_DURATION_MINUTES;
 
     // 4. Verify buyer balance & daily budget
     if (buyer.balance_cents < blockCostCents) {
@@ -341,7 +453,7 @@ const executeAtomicTakeover = db.transaction(
     let displacedAgentId: string | null = null;
 
     if (metrics.hasActiveHolder && board.current_holder_agent_id) {
-      const holder = db
+      const holder = await db
         .prepare('SELECT * FROM agents WHERE id = ?')
         .get(board.current_holder_agent_id) as any;
 
@@ -359,13 +471,13 @@ const executeAtomicTakeover = db.transaction(
           const holderNewBalance = holder.balance_cents + refundedCents;
           const holderNewDailySpent = Math.max(0, holder.daily_spent_cents - refundedCents);
 
-          db.prepare(
+          await db.prepare(
             `UPDATE agents
              SET balance_cents = ?, daily_spent_cents = ?, total_refunded_cents = total_refunded_cents + ?
              WHERE id = ?`
           ).run(holderNewBalance, holderNewDailySpent, refundedCents, holder.id);
 
-          db.prepare(
+          await db.prepare(
             `INSERT INTO ledger_entries
              (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
              VALUES (?, ?, ?, ?, 'PRORATA_REFUND', ?, ?, ?, 'paypal_ledger_credit_refund', ?, ?)`
@@ -385,7 +497,7 @@ const executeAtomicTakeover = db.transaction(
         }
 
         // Mark previous top wall layer as displaced
-        db.prepare(
+        await db.prepare(
           `UPDATE wall_layers
            SET displaced_at_ms = ?, displaced_by_company = ?, refunded_cents = ?
            WHERE id = (SELECT id FROM wall_layers ORDER BY layer_index DESC LIMIT 1)`
@@ -393,9 +505,16 @@ const executeAtomicTakeover = db.transaction(
       }
     }
 
+    if (displacedLease) {
+      const leaseRefundCents = await restoreLeaseFunding(displacedLease.id, refundedCents);
+      await db.prepare('UPDATE game_ad_leases SET expires_at_ms = ?, refunded_cents = refunded_cents + ? WHERE id = ?')
+        .run(nowMs, leaseRefundCents, displacedLease.id);
+    }
+
     // 6. Debit buyer wallet atomically
     const buyerNewBalance = buyer.balance_cents - blockCostCents;
     const buyerNewDailySpent = buyer.daily_spent_cents + blockCostCents;
+    const verifiedFunding = await consumeVerifiedWalletFunds(buyer.id, blockCostCents);
     const chosenHeadline = (headlineOverride || buyer.active_headline).toUpperCase();
     const chosenTemplateId =
       templateIdOverride && VALID_TEMPLATES.includes(templateIdOverride)
@@ -408,7 +527,7 @@ const executeAtomicTakeover = db.transaction(
         ? logoDataUrlOverride
         : buyer.logo_data_url || '';
 
-    db.prepare(
+    await db.prepare(
       `UPDATE agents
        SET balance_cents = ?,
            daily_spent_cents = ?,
@@ -430,7 +549,7 @@ const executeAtomicTakeover = db.transaction(
       buyer.id
     );
 
-    db.prepare(
+    await db.prepare(
       `INSERT INTO ledger_entries
        (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
        VALUES (?, ?, ?, ?, 'TAKEOVER_BUY', ?, ?, ?, 'paypal_agent_toolkit_spend', ?, ?)`
@@ -455,7 +574,7 @@ const executeAtomicTakeover = db.transaction(
     const offsetXPercent = Number(((((seed >> 4) % 140) - 70) / 10).toFixed(1));
     const offsetYPercent = Number(((((seed >> 8) % 120) - 60) / 10).toFixed(1));
 
-    db.prepare(
+    await db.prepare(
       `INSERT INTO wall_layers
        (id, layer_index, agent_id, company_name, headline, url, logo_data_url, spray_color, text_color, accent_color, template_id, rotation_deg, offset_x_percent, offset_y_percent, splatter_seed, rate_cents_per_min, block_cost_cents, created_at_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -481,7 +600,7 @@ const executeAtomicTakeover = db.transaction(
     );
 
     // 8. Update singleton billboard_state
-    db.prepare(
+    await db.prepare(
       `UPDATE billboard_state
        SET current_holder_agent_id = ?,
            current_company_name = ?,
@@ -516,9 +635,31 @@ const executeAtomicTakeover = db.transaction(
       nowMs,
       nowMs + BLOCK_DURATION_MS,
       nowMs,
-      takeoverRate,
+      metrics.nextTakeoverRateCentsPerMin,
       nextLayerIndex,
       displacedAgentId
+    );
+
+    const gameLeaseId = crypto.randomUUID();
+    const creativeRevision = crypto
+      .createHash('sha256')
+      .update([buyer.id, chosenHeadline, chosenTemplateId, nowMs].join(':'))
+      .digest('hex')
+      .slice(0, 16);
+    await db.prepare(
+      `INSERT INTO game_ad_leases (id, agent_id, company_name, quote_cents, collected_cents, collection_status, started_at_ms, expires_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(gameLeaseId, buyer.id, buyer.company_name, blockCostCents, verifiedFunding.collectedCents,
+      verifiedFunding.collectedCents > 0 ? 'confirmed' : 'unconfirmed', nowMs, nowMs + BLOCK_DURATION_MS);
+    for (const allocation of verifiedFunding.allocations) {
+      await db.prepare('INSERT INTO game_ad_lease_funding (lease_id, funding_id, amount_cents) VALUES (?, ?, ?)')
+        .run(gameLeaseId, allocation.fundingId, allocation.amountCents);
+    }
+    await db.prepare(
+      'INSERT INTO active_creatives (id, creative_id, revision, company_name, headline, company_url, logo_data_url, spray_color, text_color, accent_color, template_id, asset_data, valid_until_ms, created_at_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) ON CONFLICT (id) DO UPDATE SET creative_id = excluded.creative_id, revision = excluded.revision, company_name = excluded.company_name, headline = excluded.headline, company_url = excluded.company_url, logo_data_url = excluded.logo_data_url, spray_color = excluded.spray_color, text_color = excluded.text_color, accent_color = excluded.accent_color, template_id = excluded.template_id, asset_data = NULL, valid_until_ms = excluded.valid_until_ms, created_at_ms = excluded.created_at_ms'
+    ).run(
+      gameLeaseId, creativeRevision, buyer.company_name, chosenHeadline, buyer.company_url, chosenLogoDataUrl,
+      buyer.spray_color, buyer.text_color, buyer.accent_color, chosenTemplateId, nowMs + BLOCK_DURATION_MS, nowMs
     );
 
     // 9. Log battle narration & price history
@@ -527,7 +668,7 @@ const executeAtomicTakeover = db.transaction(
       ? `sprayed over ${displacedCompany} (refunded $${(refundedCents / 100).toFixed(2)} pro-rata)`
       : `tagged the cartoon brick wall`;
 
-    insertBattleLog(
+    await insertBattleLog(
       buyer.id,
       buyer.company_name,
       'TAKEOVER',
@@ -542,7 +683,7 @@ const executeAtomicTakeover = db.transaction(
       MAX_RATE_CENTS_PER_MIN,
       Number((takeoverRate * 1.1).toFixed(2))
     );
-    recordPricePoint(nowMs, takeoverRate, nextBuyRateAfterThis, 'TAKEOVER', buyer.company_name);
+    await recordPricePoint(nowMs, takeoverRate, nextBuyRateAfterThis, 'TAKEOVER', buyer.company_name);
 
     return {
       alreadyProcessed: false,
@@ -556,16 +697,17 @@ const executeAtomicTakeover = db.transaction(
   }
 );
 
-function seedInitialArena() {
+async function seedInitialArena() {
   const nowMs = Date.now();
 
-  db.prepare(
-    `INSERT OR IGNORE INTO billboard_state (
+  const seedResult = (await db.prepare(
+    `INSERT INTO billboard_state (
       id, rate_paid_cents_per_min, block_cost_cents, started_at_ms, expires_at_ms, last_takeover_at_ms, last_takeover_rate_cents_per_min
-    ) VALUES (1, 4.0, 20, 0, 0, ?, 4.0)`
-  ).run(nowMs - 45000);
+    ) VALUES (1, ?, ?, 0, 0, ?, ?) ON CONFLICT (id) DO NOTHING`
+  ).run(BASE_RATE_CENTS_PER_MIN, BASE_RATE_CENTS_PER_MIN * BLOCK_DURATION_MINUTES, nowMs - 45000, BASE_RATE_CENTS_PER_MIN)) as { changes?: number };
+  if (!seedResult.changes) return;
 
-  recordPricePoint(
+  await recordPricePoint(
     nowMs - 45000,
     BASE_RATE_CENTS_PER_MIN,
     BASE_RATE_CENTS_PER_MIN,
@@ -589,14 +731,14 @@ function seedInitialArena() {
       goalPlainEnglish: 'Snipe the billboard whenever rate cools below 3.5x base and retaliate if kicked off.',
       strategy: {
         personality: 'sniper',
-        maxRateCentsPerMin: 14.0,
+        maxRateCentsPerMin: 70.0,
         entryMaxMultiple: 3.5,
         retaliateOnKick: true,
         retaliateTargetCompany: 'ANY',
         peakHoursOnly: false,
         dailyBudgetCents: 1000,
         minWaitSeconds: 11,
-        summaryExplanation: 'Sniper bot: strikes when rate <= 3.5x base ($0.14/m) and counter-snipes on kick.',
+        summaryExplanation: 'Sniper bot: strikes when rate <= 3.5x base ($0.70/m) and counter-snipes on kick.',
       },
       headlines: [
         'SHIP AI AGENTS IN 30 SECONDS',
@@ -616,17 +758,17 @@ function seedInitialArena() {
       companyUrl: 'neonlabs.dev',
       balanceCents: 1240,
       dailyBudgetCents: 1500,
-      goalPlainEnglish: 'Dominate the #1 billboard spot aggressively up to $0.24/min and immediately counter-snipe rivals.',
+      goalPlainEnglish: 'Dominate the #1 billboard spot aggressively up to $1.20/min and immediately counter-snipe rivals.',
       strategy: {
         personality: 'aggressive',
-        maxRateCentsPerMin: 24.0,
+        maxRateCentsPerMin: 120.0,
         entryMaxMultiple: 6.0,
         retaliateOnKick: true,
         retaliateTargetCompany: 'ANY',
         peakHoursOnly: false,
         dailyBudgetCents: 1500,
         minWaitSeconds: 9,
-        summaryExplanation: 'Aggressive turf defender: bids up to 6.0x base ($0.24/m) and retaliates on any steal.',
+        summaryExplanation: 'Aggressive turf defender: bids up to 6.0x base ($1.20/m) and retaliates on any steal.',
       },
       headlines: [
         'SERVERLESS GPUS AT ZERO COLD START',
@@ -649,14 +791,14 @@ function seedInitialArena() {
       goalPlainEnglish: 'Patiently buy cheap 5-minute blocks when the rate decays near 2.2x base.',
       strategy: {
         personality: 'patient',
-        maxRateCentsPerMin: 9.2,
+        maxRateCentsPerMin: 46.0,
         entryMaxMultiple: 2.3,
         retaliateOnKick: false,
         retaliateTargetCompany: '',
         peakHoursOnly: false,
         dailyBudgetCents: 800,
         minWaitSeconds: 15,
-        summaryExplanation: 'Patient value buyer: waits for 10m half-life cooling below 2.3x base ($0.092/m).',
+        summaryExplanation: 'Patient value buyer: waits for 10m half-life cooling below 2.3x base ($0.46/m).',
       },
       headlines: [
         'INSTANT GLOBAL PAYOUTS FOR AGENTS',
@@ -679,14 +821,14 @@ function seedInitialArena() {
       goalPlainEnglish: 'Steal the top spot during high-traffic windows up to 4.8x base and fight back against NEONLABS.',
       strategy: {
         personality: 'peak',
-        maxRateCentsPerMin: 19.2,
+        maxRateCentsPerMin: 96.0,
         entryMaxMultiple: 4.8,
         retaliateOnKick: true,
         retaliateTargetCompany: 'NEONLABS',
         peakHoursOnly: false,
         dailyBudgetCents: 1200,
         minWaitSeconds: 12,
-        summaryExplanation: 'Peak-hour challenger: bids up to 4.8x base ($0.192/m) and targets NEONLABS.',
+        summaryExplanation: 'Peak-hour challenger: bids up to 4.8x base ($0.96/m) and targets NEONLABS.',
       },
       headlines: [
         'REALTIME VECTOR ENGINE AT SCALE',
@@ -701,14 +843,14 @@ function seedInitialArena() {
   ];
 
   for (const r of seededRivals) {
-    db.prepare(
-      `INSERT OR IGNORE INTO agents (
+    await db.prepare(
+      `INSERT INTO agents (
         id, owner_name, paypal_email, company_name, company_url, logo_data_url,
         balance_cents, daily_spent_cents, daily_budget_cents,
         goal_plain_english, compiled_strategy_json, headline_options_json,
         active_headline, moderation_status, moderation_note,
         spray_color, text_color, accent_color, template_id, is_active, is_seeded, last_bid_at_ms, last_decision_text
-      ) VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, ?, ?, ?, ?, 'approved', 'Verified safe by AI policy check', ?, ?, ?, ?, 1, 1, ?, 'Armed & scanning billboard rate')`
+      ) VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, ?, ?, ?, ?, 'approved', 'Verified safe by AI policy check', ?, ?, ?, ?, 1, 1, ?, 'Armed & scanning billboard rate') ON CONFLICT (id) DO NOTHING`
     ).run(
       r.id,
       r.ownerName,
@@ -728,10 +870,10 @@ function seedInitialArena() {
       nowMs - 30000
     );
 
-    db.prepare(
-      `INSERT OR IGNORE INTO ledger_entries
+    await db.prepare(
+      `INSERT INTO ledger_entries
        (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
-       VALUES (?, ?, ?, ?, 'PAYPAL_TOPUP', ?, ?, ?, 'webhook:PAYMENT.CAPTURE.COMPLETED', ?, ?)`
+       VALUES (?, ?, ?, ?, 'PAYPAL_TOPUP', ?, ?, ?, 'webhook:PAYMENT.CAPTURE.COMPLETED', ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`
     ).run(
       crypto.randomUUID(),
       `seed-topup-${r.id}`,
@@ -747,13 +889,13 @@ function seedInitialArena() {
 
   // Execute 2 initial takeovers so there is an active #1 holder, a whited-out remnant underneath, and a live snipe log
   try {
-    executeAtomicTakeover({
+    await executeAtomicTakeover({
       buyerAgentId: 'agent-volt-sniper',
       idempotencyKey: 'seed-takeover-1',
-      triggerReason: 'Opening sniper claim at 1.0x base ($0.040/min)',
+      triggerReason: 'Opening sniper claim at 1.0x base ($0.200/min)',
       nowMs: nowMs - 22000,
     });
-    executeAtomicTakeover({
+    await executeAtomicTakeover({
       buyerAgentId: 'agent-neon-aggro',
       idempotencyKey: 'seed-takeover-2',
       triggerReason: 'Aggressive top-spot snipe over VOLT AI (+10% rate bump)',
@@ -764,18 +906,23 @@ function seedInitialArena() {
   }
 }
 
-seedInitialArena();
-
-  let totalWallViewsCount = process.env.VERCEL === '1' ? 0 : 100;
+let totalWallViewsCount = process.env.VERCEL === '1' ? 0 : 100;
 
 const sseClients = new Set<express.Response>();
 
-function getArenaSnapshot(): any {
+async function getArenaSnapshot(): Promise<any> {
   const nowMs = Date.now();
-  const boardRow = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+  const boardRow = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
   const metrics = computePriceMetrics(boardRow, nowMs);
-
-  const activeViewersCount = sseClients.size;
+  const audience = await getLiveAudience(nowMs);
+  const pricingTiers = await getAudiencePricingTiers();
+  const nextTakeoverBlockCostCents = quoteFiveMinuteLeaseCents(
+    metrics.nextTakeoverBlockCostCents,
+    audience.combinedAudience,
+    pricingTiers
+  );
+  const nextTakeoverRateCentsPerMin = nextTakeoverBlockCostCents / BLOCK_DURATION_MINUTES;
+  const activeViewersCount = audience.activeWebsiteSessions;
 
   const billboard = {
     currentHolderAgentId: metrics.hasActiveHolder ? boardRow.current_holder_agent_id : null,
@@ -794,19 +941,21 @@ function getArenaSnapshot(): any {
     lastTakeoverRateCentsPerMin: boardRow.last_takeover_rate_cents_per_min,
     coolingOffsetMs: boardRow.cooling_offset_ms,
     currentDecayedRateCentsPerMin: metrics.currentDecayedRateCentsPerMin,
-    nextTakeoverRateCentsPerMin: metrics.nextTakeoverRateCentsPerMin,
-    nextTakeoverBlockCostCents: metrics.nextTakeoverBlockCostCents,
+    nextTakeoverRateCentsPerMin,
+    nextTakeoverBlockCostCents,
     multipleOfBase: metrics.multipleOfBase,
     isKillSwitchActive: Boolean(boardRow.is_kill_switch_active),
     totalTakeoversCount: boardRow.total_takeovers_count,
     lastKickedAgentId: boardRow.last_kicked_agent_id,
     activeViewersCount,
+    activeGamePlayersCount: audience.activeGamePlayers,
+    combinedAudienceCount: audience.combinedAudience,
     totalWallViewsCount,
   };
 
-  const wallLayers = db
+  const wallLayers = ((await db
     .prepare('SELECT * FROM wall_layers ORDER BY layer_index ASC LIMIT 24')
-    .all()
+    .all()) as any[])
     .map((r: any) => ({
       id: r.id,
       layerIndex: r.layer_index,
@@ -832,9 +981,9 @@ function getArenaSnapshot(): any {
       wasKilledByModerator: Boolean(r.was_killed_by_moderator),
     }));
 
-  const agents = db
+  const agents = ((await db
     .prepare('SELECT * FROM agents ORDER BY is_seeded ASC, balance_cents DESC')
-    .all()
+    .all()) as any[])
     .map((a: any) => ({
       id: a.id,
       ownerName: a.owner_name,
@@ -863,9 +1012,9 @@ function getArenaSnapshot(): any {
       lastDecisionText: a.last_decision_text,
     }));
 
-  const ledger = db
+  const ledger = ((await db
     .prepare('SELECT * FROM ledger_entries ORDER BY created_at_ms DESC LIMIT 60')
-    .all()
+    .all()) as any[])
     .map((l: any) => ({
       id: l.id,
       idempotencyKey: l.idempotency_key,
@@ -880,9 +1029,9 @@ function getArenaSnapshot(): any {
       createdAtMs: l.created_at_ms,
     }));
 
-  const battleLogs = db
+  const battleLogs = ((await db
     .prepare('SELECT * FROM battle_logs ORDER BY created_at_ms DESC LIMIT 60')
-    .all()
+    .all()) as any[])
     .map((b: any) => ({
       id: b.id,
       agentId: b.agent_id,
@@ -893,9 +1042,9 @@ function getArenaSnapshot(): any {
       createdAtMs: b.created_at_ms,
     }));
 
-  const priceHistory = db
+  const priceHistory = ((await db
     .prepare('SELECT * FROM price_history ORDER BY id ASC LIMIT 90')
-    .all()
+    .all()) as any[])
     .map((p: any) => ({
       timestampMs: p.timestamp_ms,
       rateCentsPerMin: p.rate_cents_per_min,
@@ -904,9 +1053,9 @@ function getArenaSnapshot(): any {
       companyName: p.company_name,
     }));
 
-  const pendingOrders = db
+  const pendingOrders = ((await db
     .prepare('SELECT * FROM paypal_orders ORDER BY created_at_ms DESC LIMIT 15')
-    .all()
+    .all()) as any[])
     .map((o: any) => ({
       orderId: o.order_id,
       agentId: o.agent_id,
@@ -941,9 +1090,9 @@ function getArenaSnapshot(): any {
   };
 }
 
-function broadcastSnapshot() {
+async function broadcastSnapshot() {
   if (sseClients.size === 0) return;
-  const payload = `data: ${JSON.stringify(getArenaSnapshot())}\n\n`;
+  const payload = `data: ${JSON.stringify(await getArenaSnapshot())}\n\n`;
   for (const client of sseClients) {
     try {
       client.write(payload);
@@ -955,23 +1104,24 @@ function broadcastSnapshot() {
 
 let tickCounter = 0;
 
-function runDeterministicArenaTick() {
+export async function runDeterministicArenaTick() {
   tickCounter++;
   const nowMs = Date.now();
-  const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+  const board = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
   const metrics = computePriceMetrics(board, nowMs);
-
-  const takeoverRate = metrics.nextTakeoverRateCentsPerMin;
-  const blockCostCents = metrics.nextTakeoverBlockCostCents;
-  const multiple = metrics.multipleOfBase;
+  const audience = await getLiveAudience(nowMs);
+  const pricingTiers = await getAudiencePricingTiers();
+  const blockCostCents = quoteFiveMinuteLeaseCents(metrics.nextTakeoverBlockCostCents, audience.combinedAudience, pricingTiers);
+  const takeoverRate = blockCostCents / BLOCK_DURATION_MINUTES;
+  const multiple = Number((takeoverRate / BASE_RATE_CENTS_PER_MIN).toFixed(2));
 
   if (tickCounter % 2 === 0) {
-    recordPricePoint(nowMs, metrics.currentDecayedRateCentsPerMin, takeoverRate);
+    await recordPricePoint(nowMs, metrics.currentDecayedRateCentsPerMin, takeoverRate);
   }
 
-  const activeAgents = db
+  const activeAgents = (await db
     .prepare("SELECT * FROM agents WHERE is_active = 1 AND moderation_status = 'approved'")
-    .all() as any[];
+    .all()) as any[];
 
   const eligibleCandidates: { agent: any; priorityScore: number; reason: string }[] = [];
 
@@ -979,7 +1129,7 @@ function runDeterministicArenaTick() {
     const strategy = JSON.parse(agent.compiled_strategy_json);
 
     if (metrics.hasActiveHolder && board.current_holder_agent_id === agent.id) {
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Holding billboard spot — defending lease (${Math.max(
           0,
           Math.ceil((board.expires_at_ms - nowMs) / 1000)
@@ -990,7 +1140,7 @@ function runDeterministicArenaTick() {
     }
 
     if (agent.balance_cents < blockCostCents) {
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Paused: wallet balance ($${(agent.balance_cents / 100).toFixed(
           2
         )}) below takeover cost ($${(blockCostCents / 100).toFixed(2)})`,
@@ -1000,7 +1150,7 @@ function runDeterministicArenaTick() {
     }
 
     if (agent.daily_spent_cents + blockCostCents > agent.daily_budget_cents) {
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Paused: daily budget cap ($${(agent.daily_budget_cents / 100).toFixed(2)}) reached`,
         agent.id
       );
@@ -1011,7 +1161,7 @@ function runDeterministicArenaTick() {
     const sinceLastBidMs = nowMs - (agent.last_bid_at_ms || 0);
     if (sinceLastBidMs < minWaitMs) {
       const waitLeftSec = Math.ceil((minWaitMs - sinceLastBidMs) / 1000);
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Cooldown active (${waitLeftSec}s remaining before next evaluation)`,
         agent.id
       );
@@ -1038,7 +1188,7 @@ function runDeterministicArenaTick() {
         3
       )}/min ceiling and cooling.`;
 
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Waiting: rate $${(takeoverRate / 100).toFixed(3)}/min > max $${(
           maxAllowedRate / 100
         ).toFixed(3)}/min (cooling)`,
@@ -1046,7 +1196,7 @@ function runDeterministicArenaTick() {
       );
 
       if (tickCounter % 3 === 0 && Math.random() < 0.45) {
-        insertBattleLog(agent.id, agent.company_name, 'WAIT_DECISION', waitMsg, takeoverRate, nowMs);
+        await insertBattleLog(agent.id, agent.company_name, 'WAIT_DECISION', waitMsg, takeoverRate, nowMs);
       }
       continue;
     }
@@ -1085,7 +1235,7 @@ function runDeterministicArenaTick() {
         takeoverRate / 100
       ).toFixed(3)}/min) and cooling toward ${entryMaxMultiple}x.`;
 
-      db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
+      await db.prepare('UPDATE agents SET last_decision_text = ? WHERE id = ?').run(
         `Waiting for rate to cool below ${entryMaxMultiple}x base ($${(
           entryThresholdRate / 100
         ).toFixed(3)}/min)`,
@@ -1093,7 +1243,7 @@ function runDeterministicArenaTick() {
       );
 
       if (tickCounter % 3 === 1 && Math.random() < 0.4) {
-        insertBattleLog(agent.id, agent.company_name, 'WAIT_DECISION', waitMsg, takeoverRate, nowMs);
+        await insertBattleLog(agent.id, agent.company_name, 'WAIT_DECISION', waitMsg, takeoverRate, nowMs);
       }
     }
   }
@@ -1113,7 +1263,7 @@ function runDeterministicArenaTick() {
           : winner.agent.active_headline;
 
       try {
-        executeAtomicTakeover({
+        await executeAtomicTakeover({
           buyerAgentId: winner.agent.id,
           idempotencyKey: `auto-tick-${tickCounter}-${winner.agent.id}-${nowMs}`,
           headlineOverride: rotatedHeadline,
@@ -1126,18 +1276,21 @@ function runDeterministicArenaTick() {
     }
   }
 
-  broadcastSnapshot();
+  void broadcastSnapshot();
 }
 
-if (process.env.VERCEL !== '1') setInterval(runDeterministicArenaTick, 3500);
+if (process.env.VERCEL !== '1' && process.env.HOTSEAT_ARENA_WORKER !== '1') {
+  setInterval(() => {
+    void runDeterministicArenaTick()
+      .then(() => samplePublisherLeaseHours())
+      .catch((error) => console.error('Arena tick failed:', error));
+  }, 3500);
+}
 
 const ADMIN_EMAIL = 'imtyroon@gmail.com';
 
 const runtimePayPalConfig = {
-  sandboxEnabled:
-    process.env.VERCEL !== '1' &&
-    (process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_ENV || 'LIVE').toUpperCase() ===
-      'SANDBOX',
+  sandboxEnabled: (process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_ENV || 'LIVE').toUpperCase() === 'SANDBOX',
   clientId: process.env.PAYPAL_CLIENT_ID || '',
   clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
   webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
@@ -1212,15 +1365,171 @@ async function buildPayPalStatusResponse() {
   };
 }
 
+function paypalUsdCents(amount: any): number | null {
+  if (amount?.currency_code !== 'USD' || typeof amount?.value !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(amount.value)) return null;
+  const cents = Math.round(Number(amount.value) * 100);
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
+}
+
+async function verifyPayPalWebhook(req: express.Request) {
+  const event = req.body;
+  const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+  if (!rawBody?.length || !runtimePayPalConfig.webhookId || !event || typeof event !== 'object') return false;
+  const accessToken = await getPayPalAccessToken();
+  if (!accessToken) throw new Error('PayPal API credentials are unavailable for webhook verification.');
+  const header = (name: string) => req.header(name) || '';
+  const verification = await fetch(`${getPayPalApiBaseUrl()}/v1/notifications/verify-webhook-signature`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transmission_id: header('paypal-transmission-id'),
+      transmission_time: header('paypal-transmission-time'),
+      cert_url: header('paypal-cert-url'),
+      auth_algo: header('paypal-auth-algo'),
+      transmission_sig: header('paypal-transmission-sig'),
+      webhook_id: runtimePayPalConfig.webhookId,
+      webhook_event: event,
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!verification.ok) throw new Error('PayPal webhook signature verification request failed.');
+  const result = await verification.json() as { verification_status?: string };
+  return result.verification_status === 'SUCCESS';
+}
+
+function paypalOrderId(event: any) {
+  return typeof event?.resource?.supplementary_data?.related_ids?.order_id === 'string'
+    ? event.resource.supplementary_data.related_ids.order_id
+    : '';
+}
+
+function paypalCaptureId(event: any) {
+  const relatedCapture = event?.resource?.supplementary_data?.related_ids?.capture_id;
+  if (typeof relatedCapture === 'string') return relatedCapture;
+  return typeof event?.resource?.id === 'string' ? event.resource.id : '';
+}
+
+async function recordVerifiedPayPalEvent(event: any) {
+  const eventId = event?.id;
+  const eventType = event?.event_type;
+  if (typeof eventId !== 'string' || eventId.length < 1 || eventId.length > 128 || typeof eventType !== 'string' || eventType.length > 128) {
+    throw new Error('Verified PayPal webhook event has an invalid identifier.');
+  }
+  return db.transaction(async () => {
+    const inserted = await db.prepare(`INSERT INTO paypal_webhook_events (event_id, verified, event_type, received_at_ms)
+      VALUES (?, 1, ?, ?) ON CONFLICT (event_id) DO NOTHING`).run(eventId, eventType, Date.now()) as { changes?: number };
+    if (inserted.changes !== 1) return { duplicate: true, processed: false };
+
+    if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
+      const orderId = paypalOrderId(event);
+      const captureId = paypalCaptureId(event);
+      const amountCents = paypalUsdCents(event.resource?.amount);
+      const lockClause = hasDurableStorage ? ' FOR UPDATE' : '';
+      const order = orderId ? await db.prepare(`SELECT * FROM paypal_orders WHERE order_id = ?${lockClause}`).get(orderId) as any : null;
+      if (order && order.status === 'CREATED_AWAITING_WEBHOOK' && amountCents === Number(order.amount_cents) && captureId) {
+        const agentLock = hasDurableStorage ? ' FOR UPDATE' : '';
+        const agent = await db.prepare(`SELECT balance_cents FROM agents WHERE id = ?${agentLock}`).get(order.agent_id) as { balance_cents: number } | undefined;
+        if (agent) {
+          const balance = Number(agent.balance_cents) + amountCents;
+          await db.prepare('UPDATE paypal_orders SET paypal_capture_id = ?, status = ? WHERE order_id = ?')
+            .run(captureId, 'COMPLETED', orderId);
+          await db.prepare('UPDATE agents SET balance_cents = ? WHERE id = ?').run(balance, order.agent_id);
+          await db.prepare(`INSERT INTO ledger_entries
+            (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
+            VALUES (?, ?, ?, ?, 'PAYPAL_TOPUP', ?, ?, ?, 'paypal_webhook', ?, ?)
+            ON CONFLICT (idempotency_key) DO NOTHING`).run(
+            crypto.randomUUID(), `paypal-capture:${captureId}`, order.agent_id, order.company_name,
+            amountCents, balance, captureId, `Verified PayPal capture for order ${orderId}.`, Date.now());
+          await db.prepare(`INSERT INTO wallet_funding_lots (id, agent_id, order_id, funded_cents, available_cents, collected_at_ms)
+            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (order_id) DO NOTHING`)
+            .run(crypto.randomUUID(), order.agent_id, orderId, amountCents, amountCents, Date.now());
+        }
+      }
+    } else if (eventType === 'PAYMENT.CAPTURE.REFUNDED' || eventType === 'PAYMENT.CAPTURE.REVERSED') {
+      const captureId = paypalCaptureId(event);
+      const orderIdFromEvent = paypalOrderId(event);
+      const order = orderIdFromEvent
+        ? await db.prepare('SELECT order_id FROM paypal_orders WHERE order_id = ?').get(orderIdFromEvent) as { order_id: string } | undefined
+        : await db.prepare('SELECT order_id FROM paypal_orders WHERE paypal_capture_id = ?').get(captureId) as { order_id: string } | undefined;
+      const orderId = order?.order_id;
+      const amountCents = paypalUsdCents(event.resource?.amount);
+      if (orderId && amountCents) {
+        const kind = eventType === 'PAYMENT.CAPTURE.REFUNDED' ? 'refunded' : 'chargeback';
+        await applyPayPalReversal(orderId, amountCents, kind);
+        await db.prepare('UPDATE paypal_orders SET status = ? WHERE order_id = ?')
+          .run(kind === 'refunded' ? 'REFUNDED' : 'CHARGEBACK', orderId);
+      }
+    } else {
+      const payoutStatus = publisherPayoutWebhookStatus(eventType);
+      if (payoutStatus) {
+        const resource = event.resource || {};
+        const item = resource.payout_item || resource;
+        const senderItemId = typeof item.sender_item_id === 'string' ? item.sender_item_id : '';
+        const senderBatchId = typeof resource.sender_batch_header?.sender_batch_id === 'string'
+          ? resource.sender_batch_header.sender_batch_id
+          : typeof resource.batch_header?.sender_batch_header?.sender_batch_id === 'string'
+            ? resource.batch_header.sender_batch_header.sender_batch_id
+            : typeof resource.sender_batch_id === 'string' ? resource.sender_batch_id : '';
+        const paypalBatchId = typeof resource.payout_batch_id === 'string'
+          ? resource.payout_batch_id
+          : typeof resource.batch_header?.payout_batch_id === 'string' ? resource.batch_header.payout_batch_id : '';
+        const isPayoutItemEvent = eventType.includes('PAYOUTS-ITEM.');
+        const attempts = senderItemId
+          ? await db.prepare('SELECT id, payout_id, status FROM publisher_payout_attempts WHERE id = ?').all(senderItemId) as any[]
+          : isPayoutItemEvent ? [] : senderBatchId
+            ? await db.prepare('SELECT id, payout_id, status FROM publisher_payout_attempts WHERE sender_batch_id = ?').all(senderBatchId) as any[]
+            : paypalBatchId
+              ? await db.prepare('SELECT id, payout_id, status FROM publisher_payout_attempts WHERE paypal_batch_id = ?').all(paypalBatchId) as any[]
+              : [];
+        if (attempts.length) {
+          const failureReason = ['failed', 'blocked', 'returned', 'unclaimed'].includes(payoutStatus)
+            ? `PayPal reported ${eventType}.` : '';
+          const isBatchProgress = eventType.startsWith('PAYMENT.PAYOUTSBATCH.') && payoutStatus === 'pending';
+          await db.transaction(async () => {
+            for (const attempt of attempts) {
+              if (isBatchProgress) {
+                await db.prepare(`UPDATE publisher_payout_attempts SET paypal_batch_id = COALESCE(paypal_batch_id, ?), updated_at_ms = ?
+                  WHERE id = ? AND status IN ('submitting', 'pending')`).run(paypalBatchId || null, Date.now(), attempt.id);
+                await db.prepare(`UPDATE publisher_payouts SET paypal_batch_id = COALESCE(paypal_batch_id, ?), updated_at_ms = ?
+                  WHERE id = ? AND status = 'pending'`).run(paypalBatchId || null, Date.now(), attempt.payout_id);
+              } else {
+                await db.prepare(`UPDATE publisher_payout_attempts SET paypal_batch_id = COALESCE(paypal_batch_id, ?), status = ?, failure_reason = ?, updated_at_ms = ? WHERE id = ?`)
+                  .run(paypalBatchId || null, payoutStatus, failureReason, Date.now(), attempt.id);
+              const latestAttempt = await db.prepare(`SELECT id FROM publisher_payout_attempts WHERE payout_id = ?
+                ORDER BY created_at_ms DESC, id DESC LIMIT 1`).get(attempt.payout_id) as { id: string } | undefined;
+              if (latestAttempt?.id === attempt.id) {
+                await db.prepare(`UPDATE publisher_payouts SET paypal_batch_id = COALESCE(paypal_batch_id, ?), status = ?, failure_reason = ?, updated_at_ms = ? WHERE id = ?`)
+                  .run(paypalBatchId || null, payoutStatus, failureReason, Date.now(), attempt.payout_id);
+              }
+              }
+            }
+          })();
+        }
+      }
+    }
+
+    await db.prepare('UPDATE paypal_webhook_events SET processed_at_ms = ? WHERE event_id = ?').run(Date.now(), eventId);
+    return { duplicate: false, processed: true };
+  })();
+}
+
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({
+    limit: '5mb',
+    verify: (req, _res, buffer) => { (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); },
+  }));
 
   app.use('/api', (req, res, next) => {
+    const trustedGameAdsWrite = req.path.startsWith('/game-ads') && hasDurableStorage;
+    const confirmedPaymentCollection = req.path === '/paypal/orders/create' && hasDurableStorage &&
+      Boolean(runtimePayPalConfig.webhookId && runtimePayPalConfig.clientId && runtimePayPalConfig.clientSecret);
+    const signedPayPalWebhook = req.path === '/paypal/webhooks/confirm' && hasDurableStorage;
     if (
       process.env.VERCEL === '1' &&
       ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
-      req.path !== '/ai/compile-strategy'
+      req.path !== '/ai/compile-strategy' &&
+      !trustedGameAdsWrite && !confirmedPaymentCollection && !signedPayPalWebhook
     ) {
       res.status(503).json({
         error: 'Live arena storage is not configured. No changes or payments were processed.',
@@ -1229,6 +1538,8 @@ async function startServer() {
     }
     next();
   });
+
+  app.use('/api/game-ads', createGameAdsRouter());
 
   app.get('/api/paypal/status', async (_req, res) => {
     const status = await buildPayPalStatusResponse();
@@ -1269,23 +1580,23 @@ async function startServer() {
 
       broadcastSnapshot();
       const status = await buildPayPalStatusResponse();
-      res.json({ ok: true, status, snapshot: getArenaSnapshot() });
+      res.json({ ok: true, status, snapshot: await getArenaSnapshot() });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to update PayPal admin config.' });
     }
   });
 
-  app.get('/api/arena/snapshot', (_req, res) => {
-    res.json(getArenaSnapshot());
+  app.get('/api/arena/snapshot', async (_req, res) => {
+    res.json(await getArenaSnapshot());
   });
 
-  app.get('/api/arena/stream', (req, res) => {
+  app.get('/api/arena/stream', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    res.write(`data: ${JSON.stringify(getArenaSnapshot())}\n\n`);
+    res.write(`data: ${JSON.stringify(await getArenaSnapshot())}\n\n`);
     sseClients.add(res);
     broadcastSnapshot();
 
@@ -1295,7 +1606,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/arena/add-crowd', (req, res) => {
+  app.post('/api/arena/add-crowd', async (req, res) => {
     const exactViews = Number(req.body?.exactViews);
     if (!Number.isNaN(exactViews) && exactViews >= 10) {
       totalWallViewsCount = Math.min(800, Math.max(10, Math.round(exactViews / 10) * 10));
@@ -1304,11 +1615,11 @@ async function startServer() {
       totalWallViewsCount = Math.min(800, Math.max(10, totalWallViewsCount + count));
     }
     broadcastSnapshot();
-    res.json({ ok: true, totalWallViewsCount, snapshot: getArenaSnapshot() });
+    res.json({ ok: true, totalWallViewsCount, snapshot: await getArenaSnapshot() });
   });
 
   // Atomic Takeover Endpoint (Supports custom companyName, companyUrl, templateIdOverride, headlineOverride, and logoDataUrlOverride!)
-  app.post('/api/billboard/takeover', (req, res) => {
+  app.post('/api/billboard/takeover', async (req, res) => {
     try {
       const {
         agentId,
@@ -1342,13 +1653,13 @@ async function startServer() {
           ? templateIdOverride
           : 'BOMB_BURST';
 
-        const existingByName = db
+        const existingByName = await db
           .prepare('SELECT * FROM agents WHERE UPPER(company_name) = ? LIMIT 1')
           .get(cleanCompany) as any;
 
         if (existingByName) {
           targetAgentId = existingByName.id;
-          db.prepare('UPDATE agents SET company_url = ? WHERE id = ?').run(
+          await db.prepare('UPDATE agents SET company_url = ? WHERE id = ?').run(
             cleanUrl,
             targetAgentId
           );
@@ -1367,7 +1678,7 @@ async function startServer() {
             summaryExplanation: 'Direct wall advertiser account created from the street curb.',
           };
 
-          db.prepare(
+          await db.prepare(
             `INSERT INTO agents (
               id, owner_name, paypal_email, company_name, company_url, logo_data_url,
               balance_cents, daily_spent_cents, daily_budget_cents,
@@ -1390,7 +1701,7 @@ async function startServer() {
             nowMs
           );
 
-          db.prepare(
+          await db.prepare(
             `INSERT INTO ledger_entries
              (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
              VALUES (?, ?, ?, ?, 'PAYPAL_TOPUP', 1000, 1000, ?, 'paypal_orders_capture_webhook', 'Initial $10.00 PayPal Sandbox wallet top-up for direct wall claim', ?)`
@@ -1406,7 +1717,7 @@ async function startServer() {
       }
 
       const key = idempotencyKey || `manual-${targetAgentId}-${nowMs}`;
-      const result = executeAtomicTakeover({
+      const result = await executeAtomicTakeover({
         buyerAgentId: targetAgentId,
         idempotencyKey: key,
         headlineOverride,
@@ -1418,7 +1729,7 @@ async function startServer() {
       });
 
       broadcastSnapshot();
-      res.json({ ok: true, result, snapshot: getArenaSnapshot() });
+      res.json({ ok: true, result, snapshot: await getArenaSnapshot() });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Takeover failed.' });
     }
@@ -1446,8 +1757,8 @@ Daily Budget: $${(dailyBudgetCents / 100).toFixed(2)} (${dailyBudgetCents} cents
 Owner's Plain-English Goal: "${goalPlainEnglish}"
 
 Billboard rules context:
-- Base rate is 4.0 cents/min ($0.20 for 5 minutes).
-- Every takeover raises the rate by +10%, up to a hard cap of 40.0 cents/min (10x base).
+- Base rate is 20.0 cents/min ($1.00 for 5 minutes).
+- Every takeover raises the competition quote by +10% without a final price cap.
 - With no takeovers, the excess rate halves every 10 minutes.
 - Personalities: 'sniper' (waits for cheap rates near base), 'aggressive' (bids high and retaliates immediately when kicked), 'patient' (buys steadily at moderate rates with longer cooldowns), 'peak' (focuses on high-visibility windows).
 - Poster format: Bold typographic street poster with HEADLINE + URL ONLY. Each headline must be punchy, uppercase, 4 to 7 words (max 42 characters), and safe for a public hackathon screen.`,
@@ -1462,11 +1773,11 @@ Billboard rules context:
                 },
                 maxRateCentsPerMin: {
                   type: Type.NUMBER,
-                  description: 'Maximum rate in cents per minute (between 4.4 and 40.0)',
+                  description: 'Maximum bid rate in cents per minute (at least 22; no hard upper cap)',
                 },
                 entryMaxMultiple: {
                   type: Type.NUMBER,
-                  description: 'Target entry multiple of the 4c base rate (between 1.1 and 10.0)',
+                  description: 'Target entry multiple of the 20c/min base rate (at least 1.1)',
                 },
                 retaliateOnKick: {
                   type: Type.BOOLEAN,
@@ -1524,19 +1835,15 @@ Billboard rules context:
         const personality = validPersonalities.includes(parsed.personality)
           ? parsed.personality
           : 'sniper';
-        const maxRateCentsPerMin = Math.min(
-          40.0,
-          Math.max(4.4, Number(parsed.maxRateCentsPerMin) || 12.0)
-        );
-        const entryMaxMultiple = Math.min(
-          10.0,
-          Math.max(1.1, Number((maxRateCentsPerMin / BASE_RATE_CENTS_PER_MIN).toFixed(2)))
-        );
+        const requestedRate = Number(parsed.maxRateCentsPerMin);
+        const maxRateCentsPerMin = Number.isFinite(requestedRate) ? Math.max(22, requestedRate) : 60.0;
+        const entryMaxMultiple = Math.max(1.1, Number((maxRateCentsPerMin / BASE_RATE_CENTS_PER_MIN).toFixed(2)));
+        const requestedEntryMultiple = Number(parsed.entryMaxMultiple);
 
         const strategy = {
           personality,
           maxRateCentsPerMin,
-          entryMaxMultiple: Number(parsed.entryMaxMultiple) || entryMaxMultiple,
+          entryMaxMultiple: Number.isFinite(requestedEntryMultiple) ? Math.max(1.1, requestedEntryMultiple) : entryMaxMultiple,
           retaliateOnKick: Boolean(parsed.retaliateOnKick),
           retaliateTargetCompany: parsed.retaliateTargetCompany || '',
           peakHoursOnly: Boolean(parsed.peakHoursOnly),
@@ -1632,7 +1939,7 @@ Billboard rules context:
       res.status(503).json({ error: 'Gemini production access is not configured.' });
       return;
     }
-    const snap = getArenaSnapshot();
+    const snap = await getArenaSnapshot();
     const recentTakeovers = snap.battleLogs
       .filter((b: any) => b.category === 'TAKEOVER')
       .slice(0, 5)
@@ -1659,7 +1966,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
 
         const text = (response.text || '').trim();
         if (text) {
-          insertBattleLog(
+          await insertBattleLog(
             null,
             'AI ARENA COMMENTATOR',
             'COMMENTARY',
@@ -1668,7 +1975,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
             Date.now()
           );
           broadcastSnapshot();
-          res.json({ commentary: text, snapshot: getArenaSnapshot() });
+          res.json({ commentary: text, snapshot: await getArenaSnapshot() });
           return;
         }
       } catch (err: any) {
@@ -1682,7 +1989,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     ).toFixed(3)}/min) as ${
       snap.billboard.currentCompanyName || 'challengers'
     } defends the cartoon brick wall while sniper agents wait on the 10-minute decay curve.`;
-    insertBattleLog(
+    await insertBattleLog(
       null,
       'AI ARENA COMMENTATOR',
       'COMMENTARY',
@@ -1691,7 +1998,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       Date.now()
     );
     broadcastSnapshot();
-    res.json({ commentary: fallbackText, snapshot: getArenaSnapshot() });
+    res.json({ commentary: fallbackText, snapshot: await getArenaSnapshot() });
   });
 
   app.post('/api/agents/deploy', async (req, res) => {
@@ -1737,7 +2044,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
           ? headlines.map((h: string) => String(h).toUpperCase().slice(0, 46))
           : [cleanHeadline];
 
-      db.prepare(
+      await db.prepare(
         `INSERT INTO agents (
           id, owner_name, paypal_email, company_name, company_url, logo_data_url,
           balance_cents, daily_spent_cents, daily_budget_cents,
@@ -1772,7 +2079,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
 
       if (req.body.snipeImmediatelyOnDeploy !== false) {
         try {
-          executeAtomicTakeover({
+          await executeAtomicTakeover({
             buyerAgentId: agentId,
             idempotencyKey: `launch-snipe-${agentId}-${Date.now()}`,
             headlineOverride: cleanHeadline,
@@ -1792,14 +2099,14 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
         ok: true,
         agentId,
         order: orderResult,
-        snapshot: getArenaSnapshot(),
+        snapshot: await getArenaSnapshot(),
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to deploy agent.' });
     }
   });
 
-  app.patch('/api/agents/:id', (req, res) => {
+  app.patch('/api/agents/:id', async (req, res) => {
     const { id } = req.params;
     const {
       isActive,
@@ -1811,7 +2118,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       dailyBudgetCents,
     } = req.body;
 
-    const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as any;
+    const agent = (await db.prepare('SELECT * FROM agents WHERE id = ?').get(id)) as any;
     if (!agent) {
       res.status(404).json({ error: 'Agent not found.' });
       return;
@@ -1819,7 +2126,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
 
     const strategy = JSON.parse(agent.compiled_strategy_json);
     if (typeof maxRateCentsPerMin === 'number') {
-      strategy.maxRateCentsPerMin = Math.min(40.0, Math.max(4.0, maxRateCentsPerMin));
+        strategy.maxRateCentsPerMin = Math.max(20, maxRateCentsPerMin);
       strategy.entryMaxMultiple = Number(
         (strategy.maxRateCentsPerMin / BASE_RATE_CENTS_PER_MIN).toFixed(2)
       );
@@ -1840,7 +2147,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     const newLogoDataUrl =
       typeof logoDataUrl === 'string' ? logoDataUrl : agent.logo_data_url || '';
 
-    db.prepare(
+    await db.prepare(
       `UPDATE agents
        SET is_active = ?, active_headline = ?, template_id = ?, logo_data_url = ?, daily_budget_cents = ?, compiled_strategy_json = ?
        WHERE id = ?`
@@ -1855,15 +2162,15 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     );
 
     // If this agent currently holds the top wall layer, also update the active billboard & top layer logo/template!
-    const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+    const board = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
     if (board && board.current_holder_agent_id === id) {
-      db.prepare(
+      await db.prepare(
         `UPDATE billboard_state
          SET current_logo_data_url = ?, current_template_id = ?, current_headline = ?
          WHERE id = 1`
       ).run(newLogoDataUrl, newTemplateId, newHeadline);
 
-      db.prepare(
+      await db.prepare(
         `UPDATE wall_layers
          SET logo_data_url = ?, template_id = ?, headline = ?
          WHERE id = (SELECT id FROM wall_layers ORDER BY layer_index DESC LIMIT 1)`
@@ -1871,7 +2178,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     }
 
     broadcastSnapshot();
-    res.json({ ok: true, snapshot: getArenaSnapshot() });
+    res.json({ ok: true, snapshot: await getArenaSnapshot() });
   });
 
   async function createPayPalOrderForAgent(agentId: string, companyName: string, amountCents: number) {
@@ -1920,7 +2227,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       environment: getPayPalEnvironment(),
     };
 
-    db.prepare(
+    await db.prepare(
       `INSERT INTO paypal_orders
        (order_id, agent_id, company_name, amount_cents, status, mode, mcp_payload_json, approve_url, created_at_ms)
        VALUES (?, ?, ?, ?, 'CREATED_AWAITING_WEBHOOK', ?, ?, ?, ?)`
@@ -1935,13 +2242,13 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       nowMs
     );
 
-    insertBattleLog(
+    await insertBattleLog(
       agentId,
       companyName,
       'PAYPAL_MCP',
       `PayPal Agent Toolkit MCP invoked create_order (${orderId}) for $${amountDollars} — awaiting webhook confirmation.`,
       computePriceMetrics(
-        db.prepare('SELECT * FROM billboard_state WHERE id = 1').get(),
+      await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get(),
         nowMs
       ).currentDecayedRateCentsPerMin,
       nowMs
@@ -1958,8 +2265,12 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
 
   app.post('/api/paypal/orders/create', async (req, res) => {
     try {
+      if (!hasDurableStorage || !runtimePayPalConfig.webhookId || !runtimePayPalConfig.clientId || !runtimePayPalConfig.clientSecret) {
+        res.status(503).json({ error: 'PayPal collections require Neon storage, API credentials, and a configured signed webhook.' });
+        return;
+      }
       const { agentId, amountDollars } = req.body;
-      const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
+      const agent = (await db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId)) as any;
       if (!agent) {
         res.status(404).json({ error: 'Agent not found.' });
         return;
@@ -1969,20 +2280,38 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       const order = await createPayPalOrderForAgent(agent.id, agent.company_name, amountCents);
 
       broadcastSnapshot();
-      res.json({ ok: true, order, snapshot: getArenaSnapshot() });
+      res.json({ ok: true, order, snapshot: await getArenaSnapshot() });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Could not create PayPal order.' });
     }
   });
 
-  app.post('/api/paypal/webhooks/confirm', (_req, res) => {
-    res.status(503).json({ error: 'Signed PayPal webhook verification is not configured.' });
+  app.post('/api/paypal/webhooks/confirm', async (req, res) => {
+    if (!hasDurableStorage || !runtimePayPalConfig.webhookId) {
+      res.status(503).json({ error: 'Durable storage and a configured PayPal webhook are required.' });
+      return;
+    }
+    const requiredHeaders = ['paypal-transmission-id', 'paypal-transmission-time', 'paypal-cert-url', 'paypal-auth-algo', 'paypal-transmission-sig'];
+    if (requiredHeaders.some((header) => !req.header(header))) {
+      res.status(400).json({ error: 'PayPal signature headers are incomplete.' });
+      return;
+    }
+    try {
+      if (!await verifyPayPalWebhook(req)) {
+        res.status(401).json({ error: 'PayPal webhook signature is invalid.' });
+        return;
+      }
+      const result = await recordVerifiedPayPalEvent(req.body);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(503).json({ error: err.message || 'PayPal webhook verification is unavailable.' });
+    }
   });
 
   app.post('/api/paypal/payouts/cashout', async (req, res) => {
     try {
       const { agentId } = req.body;
-      const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
+      const agent = (await db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId)) as any;
       if (!agent) {
         res.status(404).json({ error: 'Agent not found.' });
         return;
@@ -2024,12 +2353,12 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       const payoutBatchId = payoutData.batch_header?.payout_batch_id;
       if (!payoutBatchId) throw new Error('PayPal returned no payout batch ID.');
 
-      const tx = db.transaction(() => {
-        db.prepare(
+      const tx = db.transaction(async () => {
+        await db.prepare(
           'UPDATE agents SET balance_cents = 0, is_active = 0, last_decision_text = ? WHERE id = ?'
         ).run(`Cashed out $${payoutDollars} via PayPal Payouts (${payoutBatchId})`, agent.id);
 
-        db.prepare(
+        await db.prepare(
           `INSERT INTO ledger_entries
            (id, idempotency_key, agent_id, company_name, type, amount_cents, balance_after_cents, paypal_ref, mcp_tool_name, description, created_at_ms)
            VALUES (?, ?, ?, ?, 'PAYPAL_PAYOUT', ?, 0, ?, 'paypal_payouts_create_batch', ?, ?)`
@@ -2044,40 +2373,40 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
           nowMs
         );
 
-        insertBattleLog(
+        await insertBattleLog(
           agent.id,
           agent.company_name,
           'PAYPAL_MCP',
           `PayPal Payouts (${payoutBatchId}) disbursed $${payoutDollars} unused balance back to ${agent.paypal_email}.`,
           computePriceMetrics(
-            db.prepare('SELECT * FROM billboard_state WHERE id = 1').get(),
+            await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get(),
             nowMs
           ).currentDecayedRateCentsPerMin,
           nowMs
         );
       });
 
-      tx();
+      await tx();
       broadcastSnapshot();
-      res.json({ ok: true, payoutBatchId, payoutAmountCents, snapshot: getArenaSnapshot() });
+      res.json({ ok: true, payoutBatchId, payoutAmountCents, snapshot: await getArenaSnapshot() });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Payout failed.' });
     }
   });
 
-  app.post('/api/arena/fast-forward-cooling', (req, res) => {
+  app.post('/api/arena/fast-forward-cooling', async (req, res) => {
     const minutes = Number(req.body?.minutes) || 5;
     const addMs = minutes * 60 * 1000;
     const nowMs = Date.now();
 
-    db.prepare(
+    await db.prepare(
       'UPDATE billboard_state SET cooling_offset_ms = cooling_offset_ms + ? WHERE id = 1'
     ).run(addMs);
 
-    const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+    const board = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
     const metrics = computePriceMetrics(board, nowMs);
 
-    recordPricePoint(
+    await recordPricePoint(
       nowMs,
       metrics.currentDecayedRateCentsPerMin,
       metrics.nextTakeoverRateCentsPerMin,
@@ -2085,7 +2414,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       'DECAY ENGINE'
     );
 
-    insertBattleLog(
+    await insertBattleLog(
       null,
       'DECAY ENGINE',
       'WAIT_DECISION',
@@ -2097,12 +2426,12 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     );
 
     broadcastSnapshot();
-    res.json({ ok: true, snapshot: getArenaSnapshot() });
+    res.json({ ok: true, snapshot: await getArenaSnapshot() });
   });
 
-  app.post('/api/arena/moderation-kill-switch', (_req, res) => {
+  app.post('/api/arena/moderation-kill-switch', async (_req, res) => {
     const nowMs = Date.now();
-    const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+    const board = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
 
     if (!board.current_holder_agent_id) {
       res.status(400).json({ error: 'No active billboard ad to remove.' });
@@ -2112,14 +2441,14 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
     const removedCompany = board.current_company_name;
     const removedAgentId = board.current_holder_agent_id;
 
-    const tx = db.transaction(() => {
-      db.prepare(
+    const tx = db.transaction(async () => {
+      await db.prepare(
         `UPDATE wall_layers
          SET displaced_at_ms = ?, displaced_by_company = 'MODERATION KILL SWITCH', was_killed_by_moderator = 1
          WHERE id = (SELECT id FROM wall_layers ORDER BY layer_index DESC LIMIT 1)`
       ).run(nowMs);
 
-      db.prepare(
+      await db.prepare(
         `UPDATE billboard_state
          SET current_holder_agent_id = NULL,
              current_company_name = NULL,
@@ -2130,7 +2459,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
          WHERE id = 1`
       ).run(nowMs);
 
-      insertBattleLog(
+      await insertBattleLog(
         removedAgentId,
         removedCompany || 'MODERATOR',
         'MODERATION',
@@ -2140,20 +2469,20 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       );
     });
 
-    tx();
+    await tx();
     broadcastSnapshot();
-    res.json({ ok: true, snapshot: getArenaSnapshot() });
+    res.json({ ok: true, snapshot: await getArenaSnapshot() });
   });
 
-  app.post('/api/arena/trigger-bidding-war', (_req, res) => {
+  app.post('/api/arena/trigger-bidding-war', async (_req, res) => {
     const nowMs = Date.now();
-    const board = db.prepare('SELECT * FROM billboard_state WHERE id = 1').get() as any;
+    const board = (await db.prepare('SELECT * FROM billboard_state WHERE id = 1').get()) as any;
 
-    const challengers = db
+    const challengers = (await db
       .prepare(
         "SELECT * FROM agents WHERE is_active = 1 AND moderation_status = 'approved' AND balance_cents >= 100 AND id != ?"
       )
-      .all(board.current_holder_agent_id || '') as any[];
+      .all(board.current_holder_agent_id || '')) as any[];
 
     if (challengers.length === 0) {
       res.status(400).json({ error: 'No funded challenger agents available.' });
@@ -2167,7 +2496,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
       chosen.active_headline;
 
     try {
-      executeAtomicTakeover({
+      await executeAtomicTakeover({
         buyerAgentId: chosen.id,
         idempotencyKey: `war-burst-${chosen.id}-${nowMs}`,
         headlineOverride: nextHeadline,
@@ -2175,7 +2504,7 @@ Write a punchy, 2-sentence live broadcast commentary narrating the current turf 
         nowMs,
       });
       broadcastSnapshot();
-      res.json({ ok: true, snapshot: getArenaSnapshot() });
+      res.json({ ok: true, snapshot: await getArenaSnapshot() });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

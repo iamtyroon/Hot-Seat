@@ -11,12 +11,15 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "tsx server.ts",
+    "arena:worker": "tsx worker/arena.ts",
+    "test:game-ads": "tsx tests/test-game-ads.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
+    "@neondatabase/serverless": "^1.2.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@vitejs/plugin-react": "^6.1.1",
@@ -28,6 +31,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "sharp": "^0.35.5",
     "vite": "^8.3.0"
   },
   "devDependencies": {

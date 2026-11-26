@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { serverApp } from '../server.js';
 
+export const config = { api: { bodyParser: false } };
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const group = req.query.group;

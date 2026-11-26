@@ -1,8 +1,31 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "migrations/001_arena_and_game_ads.sql"
+    }
+  },
+  "daemons": {
+    "arena": {
+      "root": ".",
+      "entrypoint": "worker/Dockerfile",
+      "command": ["npm", "run", "arena:worker"]
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/game-ads/cron/reconcile",
+      "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/game-ads/cron/payouts",
+      "schedule": "15 0 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:group/:path*",
