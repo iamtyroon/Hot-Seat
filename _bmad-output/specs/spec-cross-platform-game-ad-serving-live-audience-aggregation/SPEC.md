@@ -60,5 +60,3 @@ A verified developer can register a publisher, game, and placements through the 
 
 - V1 uses static image creatives derived from the current Hot Seat ad.
 - Creative polling defaults to 15 seconds; game presence heartbeats default to 30 seconds and expire after 90 seconds.
-
-
