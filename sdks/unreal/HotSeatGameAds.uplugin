@@ -1,0 +1,12 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Hot Seat Game Ads",
+  "Description": "Image-only Hot Seat ad surfaces and trusted dedicated-server audience reporting.",
+  "Category": "Online Platform",
+  "CanContainContent": false,
+  "Modules": [
+    { "Name": "HotSeatGameAds", "Type": "Runtime", "LoadingPhase": "Default" }
+  ]
+}
