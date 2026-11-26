@@ -10,8 +10,8 @@ export type AdTemplateId =
 
 export interface CompiledStrategy {
   personality: AgentPersonality;
-  maxRateCentsPerMin: number; // 4.0 to 40.0
-  entryMaxMultiple: number; // 1.0 to 10.0 (multiple of 4c/min base)
+  maxRateCentsPerMin: number; // Competition bid rate; final audience-adjusted quote has no upper cap.
+  entryMaxMultiple: number; // Multiple of the 20c/min base.
   retaliateOnKick: boolean;
   retaliateTargetCompany: string; // '' or specific rival name or 'ANY'
   peakHoursOnly: boolean;
@@ -97,6 +97,8 @@ export interface BillboardState {
   totalTakeoversCount: number;
   lastKickedAgentId: string | null;
   activeViewersCount: number;
+  activeGamePlayersCount?: number;
+  combinedAudienceCount?: number;
   totalWallViewsCount: number;
 }
 

@@ -38,7 +38,7 @@ import {
 import { UserAccount } from './BackwallControlPage';
 import { TourProgress, TOUR_DONE_STEP, TOUR_TOTAL } from './OnboardingTour';
 
-export type PageRoute = 'wall' | 'war-room' | 'studio' | 'ledger' | 'embed';
+export type PageRoute = 'wall' | 'war-room' | 'studio' | 'ledger' | 'publishers' | 'embed';
 export type ThemePreference = 'system' | 'light' | 'dark';
 
 interface GraffitiWallStageProps {
@@ -1855,7 +1855,7 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
                   >
                     <Users className="w-3.5 h-3.5 text-[#FFE66D]" />
                     <span className="font-mono tabular-nums text-white">{totalViews}</span>
-                    <span className="text-[#95D5B2]">Views</span>
+                    <span className="text-[#95D5B2]">Demo views</span>
                     <span className="text-white/40">=</span>
                     <span className="font-mono tabular-nums text-[#FFE66D]">{tinyPeopleCount}</span>
                     <span>Tiny People</span>
@@ -2587,6 +2587,13 @@ export const GraffitiWallStage: React.FC<GraffitiWallStageProps> = ({
                     }`}
                   />
                   <span>{userAccount ? userAccount.name : 'Sign In'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateBrick('publishers')}
+                  className="street-ui-btn px-2.5 py-1 rounded-xs font-btn font-bold text-xs uppercase inline-flex items-center gap-1.5 cursor-pointer bg-[#17324A] hover:bg-[#21425F] text-[#B9E7FF]"
+                >
+                  <span>Game Ads</span>
                 </button>
               </div>
             </div>

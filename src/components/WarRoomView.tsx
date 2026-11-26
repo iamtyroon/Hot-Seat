@@ -48,7 +48,7 @@ export const WarRoomView: React.FC<WarRoomViewProps> = ({
             </span>
           </div>
           <span className="font-mono text-xs text-[#D8F3DC]">
-            Base $0.04/m · +10% Takeover Step · 10m Half-Life Decay
+            Base $0.20/m · +10% Takeover Step · 10m Half-Life Decay
           </span>
         </div>
 
@@ -86,7 +86,7 @@ export const WarRoomView: React.FC<WarRoomViewProps> = ({
               Current Billboard Holder
             </div>
             <div className="mt-1 font-display font-black text-lg text-[#141414] truncate">
-              {billboard.currentCompanyName || 'OPEN WALL ($0.20)'}
+              {billboard.currentCompanyName || 'OPEN WALL ($1.00 / 5m)'}
             </div>
           </div>
 
@@ -105,7 +105,7 @@ export const WarRoomView: React.FC<WarRoomViewProps> = ({
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs font-mono font-bold text-[#1E293B]">
-            Each takeover raises the rate by +10%. When no one bids, the excess rate halves every 10 minutes back toward $0.04/min.
+            Each takeover raises the rate by +10%. When no one bids, the excess rate halves every 10 minutes back toward $0.20/min.
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button

@@ -23,12 +23,12 @@ export const LiveRateChart: React.FC<LiveRateChartProps> = ({
 
   const recentPoints = priceHistory.slice(-36);
   const maxRateInView = Math.max(
-    16,
+    32,
     ...recentPoints.map((p) => p.takeoverRateCentsPerMin),
     billboard.nextTakeoverRateCentsPerMin + 4
   );
-  const yMax = Math.min(40, Math.ceil(maxRateInView / 4) * 4);
-  const yMin = 4.0; // Base rate = 4c/min
+  const yMin = 20.0;
+  const yMax = Math.max(yMin + 1, Math.ceil(maxRateInView / 20) * 20);
 
   const toY = (rate: number) => {
     const clamped = Math.min(yMax, Math.max(yMin, rate));
@@ -67,7 +67,7 @@ export const LiveRateChart: React.FC<LiveRateChartProps> = ({
   const projectionSteps = [0, 2.5, 5, 7.5, 10, 15, 20];
   const projectionCoords = projectionSteps.map((mins) => {
     const x = startX + (mins / 20) * projW;
-    const decayed = 4.0 + Math.max(0, currentRate - 4.0) * Math.pow(0.5, mins / 10);
+    const decayed = 20.0 + Math.max(0, currentRate - 20.0) * Math.pow(0.5, mins / 10);
     return { x, y: toY(decayed), mins, decayed };
   });
 
@@ -75,7 +75,7 @@ export const LiveRateChart: React.FC<LiveRateChartProps> = ({
     .map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`)
     .join(' ');
 
-  const yTicks = [4, Math.round((4 + yMax) / 2), yMax];
+  const yTicks = [yMin, Math.round((yMin + yMax) / 2), yMax];
 
   const gridLineColor = isDarkMode ? '#1E293B' : '#E2E8F0';
   const axisTextColor = isDarkMode ? '#94A3B8' : '#64748B';
@@ -90,7 +90,7 @@ export const LiveRateChart: React.FC<LiveRateChartProps> = ({
             Rate History &amp; 10-Minute Half-Life Cooling
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Base $0.040/min ($0.20 / 5m) · +10% per takeover · $0.400/min cap
+            Base $0.200/min ($1.00 / 5m) · +10% per takeover · no final price cap
           </p>
         </div>
         <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400">

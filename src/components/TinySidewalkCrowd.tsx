@@ -45,7 +45,7 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
   const [crowdMode, setCrowdMode] = useState<CrowdBehaviorMode>('split');
 
   // Strict 10-to-1 Viewer-to-Tiny-Person Ratio:
-  // 100 viewers = 10 tiny people, 150 viewers = 15 tiny people, etc.
+  // Demo wall views drive these decorative pedestrians; live game audience is tracked separately.
   const personCount = Math.min(80, Math.max(1, Math.floor(totalViews / 10)));
 
   const people = useMemo(() => {
@@ -507,7 +507,7 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
         </button>
       )}
 
-      {/* Tiny 2.5D Pedestrians (1 Tiny Person per 10 Views) */}
+      {/* Tiny 2.5D Pedestrians (1 decorative person per 10 simulated wall views) */}
       {people.map((p) => {
         const wrapperStyle: React.CSSProperties = p.isStoppingSpectator
           ? {
@@ -537,7 +537,7 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
           <div
             key={p.id}
             style={wrapperStyle}
-            title={`Tiny Person #${p.personNumber} (Views ${p.viewsRepresented}) · ${
+            title={`Tiny Person #${p.personNumber} (Demo views ${p.viewsRepresented}) · ${
               p.isStoppingSpectator ? 'Looking at Billboard' : 'Walking on Street'
             }`}
             className={`group absolute pointer-events-auto ${walkClass}`}
@@ -549,7 +549,7 @@ export const TinySidewalkCrowd: React.FC<TinySidewalkCrowdProps> = ({
               </div>
             ) : (
               <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-xs bg-[#181B20] text-[#FFE66D] border border-[#FFE66D]/60 font-ui font-bold text-[9px] whitespace-nowrap pointer-events-none z-30">
-                #{p.personNumber} · {p.isStoppingSpectator ? 'Looking Up' : 'Walking'} (Views {p.viewsRepresented})
+                #{p.personNumber} · {p.isStoppingSpectator ? 'Looking Up' : 'Walking'} (Demo views {p.viewsRepresented})
               </div>
             )}
 

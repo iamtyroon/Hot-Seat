@@ -6,11 +6,13 @@ import {
   ThemePreference,
 } from './components/GraffitiWallStage';
 import { BackwallControlPage, UserAccount } from './components/BackwallControlPage';
+import { PublisherDashboard } from './components/PublisherDashboard';
 import {
   auth,
   onAuthStateChanged,
   syncFirebaseUserToFirestore,
   signOutFirebaseUser,
+  signInWithGooglePopup,
 } from './firebase';
 import {
   readTourDone,
@@ -21,6 +23,7 @@ import {
 } from './components/OnboardingTour';
 
 const ACCOUNT_STORAGE_KEY = 'hotseat_user_account_v1';
+const AUDIENCE_CONSENT_KEY = 'hotseat_audience_consent_v1';
 
 export function App() {
   const [snapshot, setSnapshot] = useState<ArenaSnapshot | null>(null);
@@ -28,6 +31,13 @@ export function App() {
   const [selectedManualAgentId, setSelectedManualAgentId] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [audienceConsent, setAudienceConsent] = useState<'accepted' | 'declined' | 'unset'>(() => {
+    if (typeof window === 'undefined') return 'unset';
+    try {
+      const saved = window.localStorage.getItem(AUDIENCE_CONSENT_KEY);
+      return saved === 'accepted' || saved === 'declined' ? saved : 'unset';
+    } catch { return 'unset'; }
+  });
   // Auto-start the tour only for first-time visitors; skip/finish is remembered.
   const [onboardingStep, setOnboardingStep] = useState<number>(() => (readTourDone() ? 0 : 1));
   const prevTakeoverCountRef = useRef<number | null>(null);
@@ -65,6 +75,29 @@ export function App() {
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
+
+  useEffect(() => {
+    const syncConsent = (event: StorageEvent) => {
+      if (event.key === AUDIENCE_CONSENT_KEY) {
+        setAudienceConsent(event.newValue === 'accepted' || event.newValue === 'declined' ? event.newValue : 'unset');
+      }
+    };
+    window.addEventListener('storage', syncConsent);
+    return () => window.removeEventListener('storage', syncConsent);
+  }, []);
+
+  useEffect(() => {
+    if (audienceConsent !== 'accepted') return;
+    const heartbeat = () => {
+      void fetch('/api/game-ads/audience/heartbeat', {
+        method: 'POST',
+        credentials: 'same-origin',
+      }).catch(() => {});
+    };
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 30_000);
+    return () => window.clearInterval(interval);
+  }, [audienceConsent]);
 
   const isDarkMode =
     themePreference === 'system' ? systemPrefersDark : themePreference === 'dark';
@@ -149,6 +182,14 @@ export function App() {
       // Ignore storage restrictions
     }
     showToast('Signed out of account.');
+  };
+
+  const handleAudienceConsent = (consent: 'accepted' | 'declined') => {
+    setAudienceConsent(consent);
+    try { window.localStorage.setItem(AUDIENCE_CONSENT_KEY, consent); } catch { /* Ignore storage restrictions */ }
+    if (consent === 'declined') {
+      void fetch('/api/game-ads/audience/leave', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    }
   };
 
   const isEmbedMode =
@@ -420,7 +461,7 @@ export function App() {
     const totalV = data.totalWallViewsCount || (snapshot?.billboard.totalWallViewsCount || 0) + count;
     const tinyCount = Math.floor(totalV / 10);
     showToast(
-      `+${count} Views added (${totalV} Views total → ${tinyCount} Tiny People on the street at 10:1 ratio)!`
+      `+${count} simulated wall views (${totalV} total → ${tinyCount} Tiny People at 10:1)!`
     );
   };
 
@@ -487,7 +528,17 @@ export function App() {
       />
 
       {activePage !== 'wall' && !isEmbedMode && (
-        <BackwallControlPage
+        activePage === 'publishers' ? (
+          <PublisherDashboard
+            isDarkMode={isDarkMode}
+            userAccount={userAccount}
+            onSignIn={async () => {
+              const account = await signInWithGooglePopup();
+              handleSignIn({ ...account, id: account.uid, provider: 'google', firebaseUid: account.uid });
+            }}
+            onClose={() => setActivePage('wall')}
+          />
+        ) : <BackwallControlPage
           snapshot={snapshot}
           isDarkMode={isDarkMode}
           userAccount={userAccount}
@@ -512,6 +563,18 @@ export function App() {
           onboardingStep={onboardingStep}
           onAdvanceOnboarding={handleAdvanceOnboarding}
         />
+      )}
+
+      {audienceConsent === 'unset' && !isEmbedMode && (
+        <aside className="fixed bottom-4 left-4 right-4 z-[90] max-w-2xl rounded-xl border-2 border-[#0E1014] bg-[#14171D] p-4 text-white shadow-[4px_4px_0px_#0E1014] sm:right-auto">
+          <p className="text-xs font-ui leading-relaxed text-slate-200">
+            Hot Seat counts this browser session once in its live audience. It uses a random first-party session cookie, refreshes every 30 seconds, and removes presence after 90 seconds. Game players are counted separately from trusted game servers.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => handleAudienceConsent('accepted')} className="rounded-md bg-[#7CFF00] px-3 py-1.5 text-xs font-btn font-extrabold uppercase text-[#111318]">Allow audience count</button>
+            <button type="button" onClick={() => handleAudienceConsent('declined')} className="rounded-md border border-white/30 px-3 py-1.5 text-xs font-btn font-bold uppercase text-white">Decline</button>
+          </div>
+        </aside>
       )}
     </div>
   );
