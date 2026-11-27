@@ -13,7 +13,8 @@
     "arena": {
       "root": ".",
       "entrypoint": "worker/Dockerfile",
-      "command": ["npm", "run", "arena:worker"]
+      "command": ["npm", "run", "arena:worker"],
+      "instances": { "iad1": 0 }
     }
   },
   "crons": [

@@ -14,7 +14,7 @@ Guide for connecting an Unreal Engine game to Hot Seat's game ad service.
 
 Open `https://hotseat-three.vercel.app/api/game-ads/health`. Continue only when it returns JSON with `"ok":true` and `"durableStorage":true`. If `durableStorage` is false, contact the Hot Seat operator; publisher records, placements, and server credentials need a production database. Do not issue or deploy server credentials against an in-memory database.
 
-The production Vercel project currently has no `DATABASE_URL`, `NEON_DATABASE_URL`, or `POSTGRES_URL` configured. The operator must connect durable Neon storage and redeploy before this integration can complete credential issuance.
+The production Vercel project currently has no `DATABASE_URL`, `NEON_DATABASE_URL`, or `POSTGRES_URL` configured. The operator must connect durable Neon storage and redeploy before this integration can complete credential issuance. The arena daemon is scaled to zero until durable storage is ready.
 
 Publisher verification and payout/tax checks are separate. Automatic game and placement approval does not verify a publisher or enable payouts.
 
