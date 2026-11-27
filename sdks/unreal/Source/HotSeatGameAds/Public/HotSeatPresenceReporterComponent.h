@@ -11,7 +11,7 @@ class HOTSEATGAMEADS_API UHotSeatPresenceReporterComponent : public UActorCompon
 
 public:
     UHotSeatPresenceReporterComponent();
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString ApiBaseUrl = TEXT("https://hotseat.vercel.app");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString ApiBaseUrl = TEXT("https://hotseat-three.vercel.app");
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString GameId;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString PlacementId;
     UFUNCTION(BlueprintCallable, Category="Hot Seat") void SetActivePlayerCount(int32 Count);

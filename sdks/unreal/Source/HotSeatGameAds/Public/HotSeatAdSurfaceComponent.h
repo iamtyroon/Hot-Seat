@@ -16,7 +16,7 @@ class HOTSEATGAMEADS_API UHotSeatAdSurfaceComponent : public UActorComponent
 public:
     UHotSeatAdSurfaceComponent();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString ApiBaseUrl = TEXT("https://hotseat.vercel.app");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString ApiBaseUrl = TEXT("https://hotseat-three.vercel.app");
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") FString PlacementId;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hot Seat") TObjectPtr<UTexture2D> FallbackTexture;
     UPROPERTY(BlueprintReadOnly, Category="Hot Seat") TObjectPtr<UTexture2D> CurrentTexture;

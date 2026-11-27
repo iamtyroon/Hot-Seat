@@ -641,22 +641,23 @@ export function createGameAdsRouter() {
     if (!name || !['unity', 'unreal', 'godot'].includes(platform)) { res.status(400).json({ error: 'Game name and Unity, Unreal Engine, or Godot platform are required.' }); return; }
     if (!Number.isSafeInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 10_000 || projectEvidence.length < 8) { res.status(400).json({ error: 'Provide a server player cap from 1 to 10000 and project evidence.' }); return; }
     const id = randomId();
-    await db.prepare(`INSERT INTO games (id, publisher_id, name, platform, max_players_per_server, project_evidence, status, created_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, publisher.id, name, platform, maxPlayers, projectEvidence, Date.now());
-    res.status(202).json({ id, status: 'pending' });
+    const nowMs = Date.now();
+    await db.prepare(`INSERT INTO games (id, publisher_id, name, platform, max_players_per_server, project_evidence, status, created_at_ms, verified_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?)`).run(id, publisher.id, name, platform, maxPlayers, projectEvidence, nowMs, nowMs);
+    res.status(201).json({ id, status: 'verified' });
   });
 
   router.post('/games/:gameId/placements', async (req, res) => {
     const identity = await getIdentity(req, res); if (!identity) return;
     const publisher = await getPublisher(identity);
     const game = publisher ? await db.prepare('SELECT id, status FROM games WHERE id = ? AND publisher_id = ?').get(req.params.gameId, publisher.id) as any : null;
-    if (!game || game.status !== 'verified') { res.status(403).json({ error: 'Game must be reviewed before placements can be registered.' }); return; }
+    if (!publisher || publisher.status !== 'verified' || !game || game.status !== 'verified') { res.status(403).json({ error: 'Verified publisher and game are required before registering placements.' }); return; }
     const name = text(req.body?.name, 100);
     const aspectRatio = Number(req.body?.aspectRatio ?? 2);
     if (!name || !Number.isFinite(aspectRatio) || aspectRatio < 0.5 || aspectRatio > 10) { res.status(400).json({ error: 'Placement name and aspect ratio from 0.5 to 10 are required.' }); return; }
     const id = randomId();
-    await db.prepare('INSERT INTO placements (id, game_id, name, aspect_ratio, enabled, created_at_ms) VALUES (?, ?, ?, ?, 0, ?)').run(id, game.id, name, aspectRatio, Date.now());
-    res.status(202).json({ id, enabled: false });
+    await db.prepare('INSERT INTO placements (id, game_id, name, aspect_ratio, enabled, created_at_ms) VALUES (?, ?, ?, ?, 1, ?)').run(id, game.id, name, aspectRatio, Date.now());
+    res.status(201).json({ id, enabled: true });
   });
 
   router.post('/games/:gameId/credentials', async (req, res) => {
@@ -668,7 +669,7 @@ export function createGameAdsRouter() {
       res.status(403).json({ error: 'Project access and trusted server deployment must be reviewed before credentials are issued.' }); return;
     }
     const enabledPlacement = await db.prepare('SELECT id FROM placements WHERE game_id = ? AND enabled = 1 LIMIT 1').get(game.id);
-    if (!enabledPlacement) { res.status(403).json({ error: 'At least one game placement must be approved and enabled before credentials are issued.' }); return; }
+    if (!enabledPlacement) { res.status(403).json({ error: 'At least one enabled game placement is required before credentials are issued.' }); return; }
     const serverId = text(req.body?.serverId, 100);
     if (!/^[\w.:-]{1,100}$/.test(serverId)) { res.status(400).json({ error: 'Provide a stable server identifier for this credential.' }); return; }
     const nowMs = Date.now();

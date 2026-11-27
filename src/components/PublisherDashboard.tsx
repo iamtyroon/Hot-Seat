@@ -223,12 +223,12 @@ export const PublisherDashboard: React.FC<PublisherDashboardProps> = ({ isDarkMo
             ) : (
               <>
                 <form onSubmit={handleGameSubmit} className={`grid gap-3 rounded-xl border p-5 md:grid-cols-2 ${panel}`}>
-                  <div className="md:col-span-2"><h3 className="font-btn font-bold">Register a game</h3><p className="text-xs opacity-70">Unity, Unreal Engine, and Godot only. Approval required before serving.</p></div>
+                  <div className="md:col-span-2"><h3 className="font-btn font-bold">Register a game</h3><p className="text-xs opacity-70">Unity, Unreal Engine, and Godot only. Games and placements are approved automatically for verified publishers; Hot Seat may reject games or disable placements for policy issues.</p></div>
                   <label className="text-sm font-semibold">Game name<input name="name" required maxLength={100} className={`mt-1 w-full rounded-md border px-3 py-2 ${input}`} /></label>
                   <label className="text-sm font-semibold">Engine<select name="platform" className={`mt-1 w-full rounded-md border px-3 py-2 ${input}`}><option value="unity">Unity</option><option value="unreal">Unreal Engine</option><option value="godot">Godot</option></select></label>
                   <label className="text-sm font-semibold">Maximum players per server<input name="maxPlayersPerServer" type="number" min={1} max={10000} defaultValue={100} required className={`mt-1 w-full rounded-md border px-3 py-2 ${input}`} /></label>
                   <label className="text-sm font-semibold">Project evidence<input name="projectEvidence" required minLength={8} maxLength={1000} className={`mt-1 w-full rounded-md border px-3 py-2 ${input}`} placeholder="Repository, build, or project access" /></label>
-                  <button disabled={busy} className="rounded-md bg-[#00B9E8] px-4 py-2 text-sm font-bold text-[#07131a] disabled:opacity-50 md:col-span-2">Submit game for review</button>
+                  <button disabled={busy} className="rounded-md bg-[#00B9E8] px-4 py-2 text-sm font-bold text-[#07131a] disabled:opacity-50 md:col-span-2">Register game</button>
                 </form>
 
                 {profile.games.map((game) => {
@@ -245,7 +245,7 @@ export const PublisherDashboard: React.FC<PublisherDashboardProps> = ({ isDarkMo
                       <label className="text-xs font-semibold">Aspect ratio<input name="aspectRatio" type="number" min={0.5} max={10} step={0.1} defaultValue={2} required className={`mt-1 w-full rounded-md border px-3 py-2 text-sm ${input}`} /></label>
                       <button disabled={busy} className="self-end rounded-md bg-[#FFE66D] px-3 py-2 text-xs font-bold text-[#141414] disabled:opacity-50">Add placement</button>
                     </form>}
-                    {placements.length > 0 && <ul className="divide-y divide-current/10 text-sm">{placements.map((placement) => <li key={placement.id} className="flex flex-wrap justify-between gap-2 py-2"><span>{placement.name} · {placement.aspect_ratio}:1 · {placement.enabled ? 'enabled' : 'awaiting review'}</span><span className="text-xs opacity-70">{Number(placement.viewable_impressions_today || 0)} viewable impressions today</span></li>)}</ul>}
+                    {placements.length > 0 && <ul className="divide-y divide-current/10 text-sm">{placements.map((placement) => <li key={placement.id} className="flex flex-wrap justify-between gap-2 py-2"><span>{placement.name} · {placement.aspect_ratio}:1 · {placement.enabled ? 'enabled' : 'disabled'}</span><span className="text-xs opacity-70">{Number(placement.viewable_impressions_today || 0)} viewable impressions today</span></li>)}</ul>}
                     {credentials.map((credential) => <div key={credential.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-current/10 px-3 py-2 text-xs"><span>Server {credential.server_id} credential · created {new Date(credential.created_at_ms).toLocaleDateString()}</span><button type="button" onClick={() => revokeCredential(credential.id)} disabled={busy} className="font-bold text-red-400">Revoke</button></div>)}
                   </section>;
                 })}
