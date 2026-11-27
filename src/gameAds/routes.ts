@@ -1,10 +1,10 @@
 ﻿import crypto from 'node:crypto';
 import express, { type Request, type Response } from 'express';
 import sharp from 'sharp';
-import { db, hasDurableStorage, tryAcquirePublisherPayoutLock, tryAcquireRevenueReconciliationLock } from '../server/storage';
-import { isPlatformAdmin, verifyFirebaseIdToken, type FirebaseIdentity } from '../server/firebaseIdToken';
-import { createPayPalPublisherPayoutBatch, decryptPublisherEmail, encryptPublisherEmail, encryptPublisherText, PayPalPayoutError, publisherPiiKey } from '../server/publisherPayouts';
-import { aggregateAudience, type AudiencePricingTier, allocateIntegerPublisherShare, CREATIVE_REFRESH_SECONDS, decideHeartbeat, DEFAULT_AUDIENCE_PRICING_TIERS, eligibleLeaseNetSpendCents, getPublisherPayoutGate, isAudiencePricingTiers, toCreativeManifest } from './domain';
+import { db, hasDurableStorage, tryAcquirePublisherPayoutLock, tryAcquireRevenueReconciliationLock } from '../server/storage.js';
+import { isPlatformAdmin, verifyFirebaseIdToken, type FirebaseIdentity } from '../server/firebaseIdToken.js';
+import { createPayPalPublisherPayoutBatch, decryptPublisherEmail, encryptPublisherEmail, encryptPublisherText, PayPalPayoutError, publisherPiiKey } from '../server/publisherPayouts.js';
+import { aggregateAudience, type AudiencePricingTier, allocateIntegerPublisherShare, CREATIVE_REFRESH_SECONDS, decideHeartbeat, DEFAULT_AUDIENCE_PRICING_TIERS, eligibleLeaseNetSpendCents, getPublisherPayoutGate, isAudiencePricingTiers, toCreativeManifest } from './domain.js';
 
 const PRESENCE_RATE_LIMIT = 10;
 const BROWSER_SESSION_CREATION_RATE_LIMIT = 50;

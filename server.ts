@@ -3,10 +3,10 @@ import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
-import { db, hasDurableStorage, initializeStorage } from './src/server/storage';
-import { quoteFiveMinuteLeaseCents } from './src/gameAds/domain';
-import { createGameAdsRouter, getAudiencePricingTiers, getLiveAudience, samplePublisherLeaseHours } from './src/gameAds/routes';
-import { publisherPayoutWebhookStatus } from './src/server/publisherPayouts';
+import { db, hasDurableStorage, initializeStorage } from './src/server/storage.js';
+import { quoteFiveMinuteLeaseCents } from './src/gameAds/domain.js';
+import { createGameAdsRouter, getAudiencePricingTiers, getLiveAudience, samplePublisherLeaseHours } from './src/gameAds/routes.js';
+import { publisherPayoutWebhookStatus } from './src/server/publisherPayouts.js';
 
 dotenv.config();
 process.env.DISABLE_HMR = 'true';
